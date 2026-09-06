@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from supabase import create_client, Client
 import os
+import httpx
 
 
 # ============================================================
@@ -14,6 +15,11 @@ load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY")
+
+MODEL_URL = os.getenv(
+    "MEENAMITRA_MODEL_URL",
+    "http://127.0.0.1:8000"
+).rstrip("/")
 
 
 if not SUPABASE_URL or not SUPABASE_PUBLISHABLE_KEY:
@@ -105,7 +111,8 @@ def health():
 
     return {
         "status": "healthy",
-        "service": "MeenaMitra Backend"
+        "service": "MeenaMitra Backend",
+        "model_url": MODEL_URL
     }
 
 
@@ -266,6 +273,10 @@ def chat(
     authorization: str = Header(default=None)
 ):
 
+    # --------------------------------------------------------
+    # CHECK AUTHORIZATION
+    # --------------------------------------------------------
+
     if not authorization:
 
         raise HTTPException(
@@ -289,10 +300,18 @@ def chat(
     ).strip()
 
 
+    # --------------------------------------------------------
+    # VALIDATE USER
+    # --------------------------------------------------------
+
     user = get_current_user(
         access_token
     )
 
+
+    # --------------------------------------------------------
+    # VALIDATE QUESTION
+    # --------------------------------------------------------
 
     question = request.question.strip()
 
@@ -306,18 +325,127 @@ def chat(
 
 
     # ========================================================
-    # TEMPORARY AI RESPONSE
+    # SEND QUESTION TO MEENAMITRA MODEL ON AWS
     # ========================================================
 
-    answer = (
-        "MeenaMitra received your question. "
-        "The Hugging Face model connection will be added "
-        "in the next backend step."
-    )
+    try:
+
+        payload = {
+
+            "model": "meenamitra",
+
+            "messages": [
+
+                {
+                    "role": "user",
+                    "content": question
+                }
+
+            ],
+
+            "temperature": 0.7,
+
+            "max_tokens": 300
+        }
+
+
+        with httpx.Client(
+            timeout=httpx.Timeout(
+                connect=10.0,
+                read=180.0,
+                write=30.0,
+                pool=30.0
+            )
+        ) as client:
+
+            response = client.post(
+                f"{MODEL_URL}/v1/chat/completions",
+                json=payload
+            )
+
+
+        # ----------------------------------------------------
+        # CHECK AWS RESPONSE
+        # ----------------------------------------------------
+
+        response.raise_for_status()
+
+        result = response.json()
+
+
+        # ----------------------------------------------------
+        # EXTRACT MODEL ANSWER
+        # ----------------------------------------------------
+
+        try:
+
+            answer = (
+                result["choices"][0]
+                ["message"]
+                ["content"]
+                .strip()
+            )
+
+        except (
+            KeyError,
+            IndexError,
+            TypeError,
+            AttributeError
+        ):
+
+            raise HTTPException(
+                status_code=502,
+                detail="Invalid response received from MeenaMitra model"
+            )
+
+
+        if not answer:
+
+            raise HTTPException(
+                status_code=502,
+                detail="MeenaMitra model returned an empty response"
+            )
+
+
+    # --------------------------------------------------------
+    # AWS CONNECTION ERROR
+    # --------------------------------------------------------
+
+    except httpx.ConnectError:
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "MeenaMitra model server is unreachable. "
+                "Please make sure the AWS model server is running."
+            )
+        )
+
+
+    except httpx.TimeoutException:
+
+        raise HTTPException(
+            status_code=504,
+            detail=(
+                "MeenaMitra model took too long to respond. "
+                "Please try again."
+            )
+        )
+
+
+    except httpx.HTTPStatusError as e:
+
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "MeenaMitra model server returned an error: "
+                f"{e.response.status_code}"
+            )
+        )
 
 
     # ========================================================
-    # SAVE CHAT HISTORY
+    # SAVE CHAT HISTORY TO SUPABASE
     # ========================================================
 
     try:
@@ -343,6 +471,10 @@ def chat(
             )
         )
 
+
+    # ========================================================
+    # RETURN FINAL RESPONSE
+    # ========================================================
 
     return {
 
