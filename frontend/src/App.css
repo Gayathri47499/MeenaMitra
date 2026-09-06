@@ -874,3 +874,27 @@ textarea {
   }
 
 }
+/* ==========================================================
+   CLICKABLE CHAT HISTORY
+========================================================== */
+
+.history-item {
+  width: 100%;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.history-item:hover {
+  cursor: pointer;
+}
+
+.history-item.active {
+  font-weight: 600;
+}

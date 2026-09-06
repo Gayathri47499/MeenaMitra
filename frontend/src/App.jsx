@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
 import {
   Send,
   Fish,
@@ -19,11 +20,16 @@ const API_URL =
 
 function App() {
 
+  // ==========================================================
+  // STATE
+  // ==========================================================
+
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   const [showSignup, setShowSignup] = useState(false);
 
   const [email, setEmail] = useState("");
+
   const [password, setPassword] = useState("");
 
   const [question, setQuestion] = useState("");
@@ -38,6 +44,28 @@ function App() {
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
+  const [activeHistoryId, setActiveHistoryId] = useState(null);
+
+
+  // ==========================================================
+  // RESTORE LOGIN SESSION WHEN PAGE IS REFRESHED
+  // ==========================================================
+
+  useEffect(() => {
+
+    const token =
+      localStorage.getItem("meenamitra_token");
+
+    if (token) {
+
+      setIsLoggedIn(true);
+
+      loadHistory(token);
+
+    }
+
+  }, []);
+
 
   // ==========================================================
   // SIGNUP
@@ -51,27 +79,37 @@ function App() {
 
     try {
 
-      const response = await fetch(`${API_URL}/signup`, {
-        method: "POST",
+      const response = await fetch(
+        `${API_URL}/signup`,
+        {
+          method: "POST",
 
-        headers: {
-          "Content-Type": "application/json",
-        },
+          headers: {
+            "Content-Type": "application/json",
+          },
 
-        body: JSON.stringify({
-          email,
-          password,
-        }),
-      });
+          body: JSON.stringify({
+            email,
+            password,
+          }),
+        }
+      );
 
 
       const data = await response.json();
 
 
       if (!response.ok) {
-        throw new Error(data.detail || "Signup failed");
+
+        throw new Error(
+          data.detail || "Signup failed"
+        );
+
       }
 
+
+      // Some Supabase configurations return
+      // an access token immediately.
 
       if (data.access_token) {
 
@@ -82,20 +120,32 @@ function App() {
 
         setIsLoggedIn(true);
 
-      } else {
+        await loadHistory(
+          data.access_token
+        );
+
+      }
+
+      else {
 
         setError(
           "Signup successful. Please check your email to confirm your account, then login."
         );
 
         setShowSignup(false);
+
       }
 
-    } catch (err) {
+    }
 
-      setError(err.message);
+    catch (err) {
+
+      setError(
+        err.message || "Signup failed"
+      );
 
     }
+
   }
 
 
@@ -111,25 +161,32 @@ function App() {
 
     try {
 
-      const response = await fetch(`${API_URL}/login`, {
-        method: "POST",
+      const response = await fetch(
+        `${API_URL}/login`,
+        {
+          method: "POST",
 
-        headers: {
-          "Content-Type": "application/json",
-        },
+          headers: {
+            "Content-Type": "application/json",
+          },
 
-        body: JSON.stringify({
-          email,
-          password,
-        }),
-      });
+          body: JSON.stringify({
+            email,
+            password,
+          }),
+        }
+      );
 
 
       const data = await response.json();
 
 
       if (!response.ok) {
-        throw new Error(data.detail || "Login failed");
+
+        throw new Error(
+          data.detail || "Login failed"
+        );
+
       }
 
 
@@ -141,14 +198,22 @@ function App() {
 
       setIsLoggedIn(true);
 
-      loadHistory(data.access_token);
 
-
-    } catch (err) {
-
-      setError(err.message);
+      // Load saved conversations
+      await loadHistory(
+        data.access_token
+      );
 
     }
+
+    catch (err) {
+
+      setError(
+        err.message || "Login failed"
+      );
+
+    }
+
   }
 
 
@@ -163,6 +228,8 @@ function App() {
       const response = await fetch(
         `${API_URL}/history`,
         {
+          method: "GET",
+
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -173,58 +240,128 @@ function App() {
       const data = await response.json();
 
 
-      if (response.ok) {
+      if (!response.ok) {
 
-        setHistory(
-          data.conversations || []
+        throw new Error(
+          data.detail || "Could not load chat history"
         );
 
       }
 
-    } catch (err) {
 
-      console.error(err);
+      // IMPORTANT:
+      //
+      // Backend returns:
+      // { history: [...] }
+      //
+      // NOT:
+      // { conversations: [...] }
+
+      setHistory(
+        Array.isArray(data.history)
+          ? data.history
+          : []
+      );
 
     }
+
+    catch (err) {
+
+      console.error(
+        "History loading error:",
+        err
+      );
+
+    }
+
   }
 
 
   // ==========================================================
-  // SEND CHAT
+  // OPEN OLD CONVERSATION
+  // ==========================================================
+
+  function openHistoryChat(item) {
+
+    setActiveHistoryId(item.id);
+
+    setMessages([
+      {
+        role: "user",
+        content: item.question,
+      },
+
+      {
+        role: "assistant",
+        content: item.answer,
+      },
+    ]);
+
+    setError("");
+
+  }
+
+
+  // ==========================================================
+  // SEND CHAT MESSAGE
   // ==========================================================
 
   async function sendMessage(e) {
 
     e.preventDefault();
 
-    if (!question.trim() || loading) {
+
+    if (
+      !question.trim() ||
+      loading
+    ) {
+
       return;
+
     }
 
 
     const token =
-      localStorage.getItem("meenamitra_token");
+      localStorage.getItem(
+        "meenamitra_token"
+      );
 
 
     if (!token) {
 
-      setError("Please login first.");
+      setError(
+        "Please login first."
+      );
 
       return;
+
     }
 
 
-    const currentQuestion = question.trim();
+    const currentQuestion =
+      question.trim();
 
 
-    setMessages((previous) => [
-      ...previous,
+    // Immediately display user message
 
-      {
-        role: "user",
-        content: currentQuestion,
-      },
-    ]);
+    setMessages(
+      (previous) => [
+
+        ...previous,
+
+        {
+          role: "user",
+          content: currentQuestion,
+        },
+
+      ]
+    );
+
+
+    // New message means we're no longer
+    // viewing a previous saved conversation.
+
+    setActiveHistoryId(null);
 
 
     setQuestion("");
@@ -244,48 +381,70 @@ function App() {
           headers: {
             "Content-Type": "application/json",
 
-            Authorization: `Bearer ${token}`,
+            Authorization:
+              `Bearer ${token}`,
           },
 
           body: JSON.stringify({
-            question: currentQuestion,
+            question:
+              currentQuestion,
           }),
         }
       );
 
 
-      const data = await response.json();
+      const data =
+        await response.json();
 
 
       if (!response.ok) {
+
         throw new Error(
-          data.detail || "Something went wrong"
+          data.detail ||
+          "Something went wrong"
         );
+
       }
 
 
-      setMessages((previous) => [
-        ...previous,
+      // Display AI answer
 
-        {
-          role: "assistant",
-          content: data.answer,
-        },
-      ]);
+      setMessages(
+        (previous) => [
+
+          ...previous,
+
+          {
+            role: "assistant",
+            content: data.answer,
+          },
+
+        ]
+      );
 
 
-      loadHistory(token);
+      // Reload history after
+      // successful database save
 
+      await loadHistory(token);
 
-    } catch (err) {
+    }
 
-      setError(err.message);
+    catch (err) {
 
-    } finally {
+      setError(
+        err.message ||
+        "Unable to get response"
+      );
+
+    }
+
+    finally {
 
       setLoading(false);
 
     }
+
   }
 
 
@@ -299,11 +458,18 @@ function App() {
       "meenamitra_token"
     );
 
+
     setIsLoggedIn(false);
 
     setMessages([]);
 
     setHistory([]);
+
+    setActiveHistoryId(null);
+
+    setQuestion("");
+
+    setError("");
 
   }
 
@@ -316,7 +482,11 @@ function App() {
 
     setMessages([]);
 
+    setQuestion("");
+
     setError("");
+
+    setActiveHistoryId(null);
 
   }
 
@@ -334,30 +504,41 @@ function App() {
         <div className="auth-card">
 
           <div className="logo-circle">
+
             <Fish size={38} />
+
           </div>
 
 
           <h1>
+
             Meena<span>Mitra</span>
+
           </h1>
 
 
           <p className="tagline">
+
             Your intelligent aquaculture companion
+
           </p>
 
 
           <div className="ai-badge">
+
             <Sparkles size={15} />
+
             AI-powered fish farming advisor
+
           </div>
 
 
           <h2>
+
             {showSignup
               ? "Create your account"
               : "Welcome back"}
+
           </h2>
 
 
@@ -402,9 +583,13 @@ function App() {
 
 
             {error && (
+
               <div className="error">
+
                 {error}
+
               </div>
+
             )}
 
 
@@ -425,8 +610,13 @@ function App() {
           <button
             className="switch-button"
             onClick={() => {
-              setShowSignup(!showSignup);
+
+              setShowSignup(
+                !showSignup
+              );
+
               setError("");
+
             }}
           >
 
@@ -439,7 +629,9 @@ function App() {
         </div>
 
       </div>
+
     );
+
   }
 
 
@@ -451,7 +643,10 @@ function App() {
 
     <div className="app">
 
-      {/* SIDEBAR */}
+
+      {/* ======================================================
+          SIDEBAR
+      ====================================================== */}
 
       <aside
         className={
@@ -461,16 +656,24 @@ function App() {
         }
       >
 
+
+        {/* SIDEBAR HEADER */}
+
         <div className="sidebar-header">
 
           <div className="brand-small">
 
             <div className="small-logo">
+
               <Fish size={22} />
+
             </div>
 
+
             <span>
+
               MeenaMitra
+
             </span>
 
           </div>
@@ -490,6 +693,8 @@ function App() {
         </div>
 
 
+        {/* NEW CHAT */}
+
         <button
           className="new-chat-button"
           onClick={newChat}
@@ -502,6 +707,8 @@ function App() {
         </button>
 
 
+        {/* RECENT CONVERSATIONS TITLE */}
+
         <div className="history-title">
 
           <MessageCircle size={16} />
@@ -510,6 +717,8 @@ function App() {
 
         </div>
 
+
+        {/* HISTORY */}
 
         <div className="history-list">
 
@@ -529,18 +738,33 @@ function App() {
 
             history.map((item) => (
 
-              <div
-                className="history-item"
+              <button
+                type="button"
+
+                className={
+                  activeHistoryId === item.id
+                    ? "history-item active"
+                    : "history-item"
+                }
+
                 key={item.id}
+
+                onClick={() =>
+                  openHistoryChat(item)
+                }
               >
 
-                <MessageCircle size={15} />
+                <MessageCircle
+                  size={15}
+                />
 
                 <span>
+
                   {item.question}
+
                 </span>
 
-              </div>
+              </button>
 
             ))
 
@@ -548,6 +772,8 @@ function App() {
 
         </div>
 
+
+        {/* SIDEBAR BOTTOM */}
 
         <div className="sidebar-bottom">
 
@@ -576,9 +802,14 @@ function App() {
       </aside>
 
 
-      {/* MAIN */}
+      {/* ======================================================
+          MAIN CHAT AREA
+      ====================================================== */}
 
       <main className="chat-area">
+
+
+        {/* HEADER */}
 
         <header className="chat-header">
 
@@ -601,11 +832,16 @@ function App() {
           <div>
 
             <h2>
+
               MeenaMitra
+
             </h2>
 
+
             <span>
+
               Aquaculture AI Advisor
+
             </span>
 
           </div>
@@ -613,7 +849,12 @@ function App() {
         </header>
 
 
+        {/* ====================================================
+            MESSAGES
+        ==================================================== */}
+
         <section className="messages">
+
 
           {messages.length === 0 ? (
 
@@ -627,17 +868,23 @@ function App() {
 
 
               <h1>
+
                 How can I help your pond today?
+
               </h1>
 
 
               <p>
-                Ask me about water quality, feeding,
-                fish health, pond management and more.
+
+                Ask me about water quality,
+                feeding, fish health,
+                pond management and more.
+
               </p>
 
 
               <div className="suggestions">
+
 
                 <button
                   onClick={() =>
@@ -690,76 +937,98 @@ function App() {
 
                 </button>
 
+
               </div>
 
             </div>
 
           ) : (
 
-            messages.map((message, index) => (
+            messages.map(
+              (message, index) => (
 
-              <div
-                className={
-                  message.role === "user"
-                    ? "message user-message"
-                    : "message assistant-message"
-                }
-                key={index}
-              >
+                <div
+                  className={
+                    message.role === "user"
+                      ? "message user-message"
+                      : "message assistant-message"
+                  }
 
-                <div className="message-avatar">
-
-                  {message.role === "user"
-                    ? "👩‍🌾"
-                    : "🐟"}
-
-                </div>
+                  key={index}
+                >
 
 
-                <div className="message-content">
-
-                  <div className="message-name">
+                  <div className="message-avatar">
 
                     {message.role === "user"
-                      ? "You"
-                      : "MeenaMitra"}
+                      ? "👩‍🌾"
+                      : "🐟"}
 
                   </div>
 
 
-                  <div className="message-text">
+                  <div className="message-content">
 
-                    {message.content}
+
+                    <div className="message-name">
+
+                      {message.role === "user"
+                        ? "You"
+                        : "MeenaMitra"}
+
+                    </div>
+
+
+                    <div className="message-text">
+
+                      {message.content}
+
+                    </div>
+
 
                   </div>
 
                 </div>
 
-              </div>
+              )
 
-            ))
+            )
 
           )}
 
+
+          {/* THINKING INDICATOR */}
 
           {loading && (
 
             <div className="message assistant-message">
 
               <div className="message-avatar">
+
                 🐟
+
               </div>
+
 
               <div className="message-content">
 
                 <div className="message-name">
+
                   MeenaMitra
+
                 </div>
 
+
                 <div className="typing">
-                  Thinking<span>.</span>
+
+                  Thinking
+
                   <span>.</span>
+
                   <span>.</span>
+
+                  <span>.</span>
+
                 </div>
 
               </div>
@@ -771,14 +1040,22 @@ function App() {
         </section>
 
 
+        {/* ERROR */}
+
         {error && (
 
           <div className="chat-error">
+
             {error}
+
           </div>
 
         )}
 
+
+        {/* ====================================================
+            CHAT INPUT
+        ==================================================== */}
 
         <form
           className="chat-input-area"
@@ -787,13 +1064,21 @@ function App() {
 
           <div className="input-wrapper">
 
+
             <textarea
+
               value={question}
+
               onChange={(e) =>
-                setQuestion(e.target.value)
+                setQuestion(
+                  e.target.value
+                )
               }
+
               placeholder="Ask MeenaMitra about your fish farm..."
+
               rows={1}
+
               onKeyDown={(e) => {
 
                 if (
@@ -808,21 +1093,27 @@ function App() {
                 }
 
               }}
+
             />
 
 
             <button
+
               className="send-button"
+
               type="submit"
+
               disabled={
                 loading ||
                 !question.trim()
               }
+
             >
 
               <Send size={19} />
 
             </button>
+
 
           </div>
 
@@ -834,12 +1125,16 @@ function App() {
 
           </div>
 
+
         </form>
+
 
       </main>
 
     </div>
+
   );
+
 }
 
 

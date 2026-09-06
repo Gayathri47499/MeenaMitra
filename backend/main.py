@@ -1,37 +1,32 @@
-from fastapi import FastAPI, HTTPException, Header
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from dotenv import load_dotenv
-from supabase import create_client, Client
 import os
 import httpx
 
+from dotenv import load_dotenv
+from fastapi import FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from supabase import create_client, Client
 
-# ============================================================
-# ENVIRONMENT
-# ============================================================
+
+# ---------------------------------------------------------
+# Load environment variables
+# ---------------------------------------------------------
 
 load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY")
+MODEL_URL = os.getenv("MEENAMITRA_MODEL_URL")
 
-MODEL_URL = os.getenv(
-    "MEENAMITRA_MODEL_URL",
-    "http://127.0.0.1:8000"
-).rstrip("/")
+if not SUPABASE_URL:
+    raise RuntimeError("SUPABASE_URL is missing")
 
+if not SUPABASE_PUBLISHABLE_KEY:
+    raise RuntimeError("SUPABASE_PUBLISHABLE_KEY is missing")
 
-if not SUPABASE_URL or not SUPABASE_PUBLISHABLE_KEY:
-    raise RuntimeError(
-        "SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY "
-        "must be set in backend/.env"
-    )
+if not MODEL_URL:
+    raise RuntimeError("MEENAMITRA_MODEL_URL is missing")
 
-
-# ============================================================
-# SUPABASE CLIENT
-# ============================================================
 
 supabase: Client = create_client(
     SUPABASE_URL,
@@ -39,48 +34,35 @@ supabase: Client = create_client(
 )
 
 
-# ============================================================
-# FASTAPI
-# ============================================================
+# ---------------------------------------------------------
+# FastAPI
+# ---------------------------------------------------------
 
 app = FastAPI(
     title="MeenaMitra API",
-    description="Backend API for the MeenaMitra aquaculture AI advisor",
+    description="AI fish-farming advisor API",
     version="1.0.0"
 )
 
 
-# ============================================================
+# ---------------------------------------------------------
 # CORS
-# ============================================================
+# ---------------------------------------------------------
 
 app.add_middleware(
     CORSMiddleware,
-
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "https://meenamitra.vercel.app",
-    ],
-
-    allow_credentials=True,
-
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
-
     allow_headers=["*"],
 )
 
 
-# ============================================================
-# REQUEST MODELS
-# ============================================================
+# ---------------------------------------------------------
+# Request models
+# ---------------------------------------------------------
 
-class SignupRequest(BaseModel):
-    email: str
-    password: str
-
-
-class LoginRequest(BaseModel):
+class AuthRequest(BaseModel):
     email: str
     password: str
 
@@ -89,267 +71,211 @@ class ChatRequest(BaseModel):
     question: str
 
 
-# ============================================================
-# ROOT
-# ============================================================
+# ---------------------------------------------------------
+# Root
+# ---------------------------------------------------------
 
 @app.get("/")
 def root():
-
     return {
         "message": "MeenaMitra API is running",
-        "status": "online"
+        "model": "Qwen2.5-1.5B fine-tuned for aquaculture"
     }
 
 
-# ============================================================
-# HEALTH
-# ============================================================
+# ---------------------------------------------------------
+# Health
+# ---------------------------------------------------------
 
 @app.get("/health")
 def health():
-
     return {
-        "status": "healthy",
-        "service": "MeenaMitra Backend",
-        "model_url": MODEL_URL
+        "status": "ok"
     }
 
 
-# ============================================================
-# SIGNUP
-# ============================================================
+# ---------------------------------------------------------
+# Signup
+# ---------------------------------------------------------
 
 @app.post("/signup")
-def signup(request: SignupRequest):
+def signup(data: AuthRequest):
 
     try:
-
-        response = supabase.auth.sign_up({
-            "email": request.email,
-            "password": request.password
+        result = supabase.auth.sign_up({
+            "email": data.email,
+            "password": data.password
         })
 
-        user = response.user
-        session = response.session
+        if not result.user:
+            raise HTTPException(
+                status_code=400,
+                detail="Signup failed"
+            )
 
         return {
             "message": "Signup successful",
-
-            "user_id": (
-                user.id
-                if user
-                else None
-            ),
-
-            "email": (
-                user.email
-                if user
-                else request.email
-            ),
-
-            "access_token": (
-                session.access_token
-                if session
-                else None
-            ),
-
-            "refresh_token": (
-                session.refresh_token
-                if session
-                else None
-            ),
-
-            "email_confirmation_required": (
-                session is None
-            )
+            "user_id": result.user.id
         }
 
-    except Exception as e:
+    except HTTPException:
+        raise
 
+    except Exception as e:
         raise HTTPException(
             status_code=400,
             detail=str(e)
         )
 
 
-# ============================================================
-# LOGIN
-# ============================================================
+# ---------------------------------------------------------
+# Login
+# ---------------------------------------------------------
 
 @app.post("/login")
-def login(request: LoginRequest):
+def login(data: AuthRequest):
 
     try:
-
-        response = supabase.auth.sign_in_with_password({
-            "email": request.email,
-            "password": request.password
+        result = supabase.auth.sign_in_with_password({
+            "email": data.email,
+            "password": data.password
         })
 
-        if not response.session:
-
+        if not result.session:
             raise HTTPException(
                 status_code=401,
-                detail="Login failed"
+                detail="Invalid email or password"
             )
 
         return {
-
-            "message": "Login successful",
-
-            "user_id": response.user.id,
-
-            "email": response.user.email,
-
-            "access_token": (
-                response.session.access_token
-            ),
-
-            "refresh_token": (
-                response.session.refresh_token
-            )
+            "access_token": result.session.access_token,
+            "user_id": result.user.id,
+            "email": result.user.email
         }
 
     except HTTPException:
-
         raise
 
     except Exception as e:
-
         raise HTTPException(
             status_code=401,
             detail=str(e)
         )
 
 
-# ============================================================
-# GET CURRENT USER
-# ============================================================
+# ---------------------------------------------------------
+# Get current user from Supabase token
+# ---------------------------------------------------------
 
-def get_current_user(access_token: str):
+def get_current_user(authorization: str):
 
-    if not access_token:
-
+    if not authorization:
         raise HTTPException(
             status_code=401,
-            detail="Missing access token"
+            detail="Authorization header missing"
         )
+
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authorization header"
+        )
+
+    token = authorization.replace("Bearer ", "", 1)
 
     try:
+        user_response = supabase.auth.get_user(token)
 
-        response = supabase.auth.get_user(
-            access_token
-        )
-
-        if not response.user:
-
+        if not user_response.user:
             raise HTTPException(
                 status_code=401,
-                detail="Invalid access token"
+                detail="Invalid token"
             )
 
-        return response.user
+        return user_response.user
 
     except HTTPException:
-
         raise
 
     except Exception:
-
         raise HTTPException(
             status_code=401,
-            detail="Invalid or expired access token"
+            detail="Invalid or expired token"
         )
 
 
-# ============================================================
-# CHAT
-# ============================================================
+# ---------------------------------------------------------
+# Chat
+# ---------------------------------------------------------
 
 @app.post("/chat")
-def chat(
-    request: ChatRequest,
-    authorization: str = Header(default=None)
+async def chat(
+    data: ChatRequest,
+    authorization: str = Header(default="")
 ):
 
-    # --------------------------------------------------------
-    # CHECK AUTHORIZATION
-    # --------------------------------------------------------
+    user = get_current_user(authorization)
 
-    if not authorization:
-
-        raise HTTPException(
-            status_code=401,
-            detail="Authorization header is required"
-        )
-
-
-    if not authorization.startswith("Bearer "):
-
-        raise HTTPException(
-            status_code=401,
-            detail="Authorization must use Bearer token"
-        )
-
-
-    access_token = authorization.replace(
-        "Bearer ",
-        "",
-        1
-    ).strip()
-
-
-    # --------------------------------------------------------
-    # VALIDATE USER
-    # --------------------------------------------------------
-
-    user = get_current_user(
-        access_token
-    )
-
-
-    # --------------------------------------------------------
-    # VALIDATE QUESTION
-    # --------------------------------------------------------
-
-    question = request.question.strip()
-
+    question = data.question.strip()
 
     if not question:
-
         raise HTTPException(
             status_code=400,
             detail="Question cannot be empty"
         )
 
+    # -----------------------------------------------------
+    # System prompt
+    # -----------------------------------------------------
 
-    # ========================================================
-    # SEND QUESTION TO MEENAMITRA MODEL ON AWS
-    # ========================================================
+    system_prompt = """
+You are MeenaMitra, an AI advisor specialized in
+small-scale pond-based fish farming and aquaculture.
+
+Answer specifically for fish farmers and pond aquaculture.
+
+Do not discuss aquariums unless the user explicitly asks
+about aquariums.
+
+Give practical, simple and useful advice.
+
+Consider fish species, fish size, fish biomass, water
+temperature, dissolved oxygen, pH, ammonia, feed quantity,
+feeding frequency, pond conditions and fish health when
+relevant.
+
+If important information is missing, say what information
+is needed instead of inventing exact values.
+
+Keep answers clear and concise.
+
+You can answer in English or Telugu depending on the
+language used by the farmer.
+"""
+
+    payload = {
+        "model": "meenamitra",
+        "messages": [
+            {
+                "role": "system",
+                "content": system_prompt
+            },
+            {
+                "role": "user",
+                "content": question
+            }
+        ],
+        "temperature": 0.7,
+        "max_tokens": 300
+    }
+
+    # -----------------------------------------------------
+    # Call AWS llama.cpp model
+    # -----------------------------------------------------
 
     try:
 
-        payload = {
-
-            "model": "meenamitra",
-
-            "messages": [
-
-                {
-                    "role": "user",
-                    "content": question
-                }
-
-            ],
-
-            "temperature": 0.7,
-
-            "max_tokens": 300
-        }
-
-
-        with httpx.Client(
+        async with httpx.AsyncClient(
             timeout=httpx.Timeout(
                 connect=10.0,
                 read=180.0,
@@ -358,58 +284,16 @@ def chat(
             )
         ) as client:
 
-            response = client.post(
-                f"{MODEL_URL}/v1/chat/completions",
+            response = await client.post(
+                f"{MODEL_URL.rstrip('/')}/v1/chat/completions",
                 json=payload
             )
 
+            response.raise_for_status()
 
-        # ----------------------------------------------------
-        # CHECK AWS RESPONSE
-        # ----------------------------------------------------
+            result = response.json()
 
-        response.raise_for_status()
-
-        result = response.json()
-
-
-        # ----------------------------------------------------
-        # EXTRACT MODEL ANSWER
-        # ----------------------------------------------------
-
-        try:
-
-            answer = (
-                result["choices"][0]
-                ["message"]
-                ["content"]
-                .strip()
-            )
-
-        except (
-            KeyError,
-            IndexError,
-            TypeError,
-            AttributeError
-        ):
-
-            raise HTTPException(
-                status_code=502,
-                detail="Invalid response received from MeenaMitra model"
-            )
-
-
-        if not answer:
-
-            raise HTTPException(
-                status_code=502,
-                detail="MeenaMitra model returned an empty response"
-            )
-
-
-    # --------------------------------------------------------
-    # AWS CONNECTION ERROR
-    # --------------------------------------------------------
+            answer = result["choices"][0]["message"]["content"].strip()
 
     except httpx.ConnectError:
 
@@ -421,142 +305,78 @@ def chat(
             )
         )
 
-
     except httpx.TimeoutException:
 
         raise HTTPException(
             status_code=504,
-            detail=(
-                "MeenaMitra model took too long to respond. "
-                "Please try again."
-            )
+            detail="MeenaMitra model took too long to respond."
+
         )
 
+    except Exception as e:
 
-    except httpx.HTTPStatusError as e:
+        print("MODEL ERROR:", repr(e))
 
         raise HTTPException(
-            status_code=502,
-            detail=(
-                "MeenaMitra model server returned an error: "
-                f"{e.response.status_code}"
-            )
+            status_code=500,
+            detail="MeenaMitra model failed to generate a response."
         )
 
-
-    # ========================================================
-    # SAVE CHAT HISTORY TO SUPABASE
-    # ========================================================
+    # -----------------------------------------------------
+    # Save chat history
+    # -----------------------------------------------------
 
     try:
 
-        supabase.table(
-            "chat_history"
-        ).insert({
-
+        supabase.table("chat_history").insert({
             "user_id": user.id,
-
             "question": question,
-
             "answer": answer
-
         }).execute()
 
     except Exception as e:
 
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                f"Could not save chat history: {str(e)}"
-            )
-        )
+        print("HISTORY SAVE ERROR:", repr(e))
 
-
-    # ========================================================
-    # RETURN FINAL RESPONSE
-    # ========================================================
+    # -----------------------------------------------------
+    # Return answer
+    # -----------------------------------------------------
 
     return {
-
-        "user_id": user.id,
-
         "question": question,
-
         "answer": answer
     }
 
 
-# ============================================================
-# CHAT HISTORY
-# ============================================================
+# ---------------------------------------------------------
+# Chat history
+# ---------------------------------------------------------
 
 @app.get("/history")
 def history(
-    authorization: str = Header(default=None)
+    authorization: str = Header(default="")
 ):
 
-    if not authorization:
-
-        raise HTTPException(
-            status_code=401,
-            detail="Authorization header is required"
-        )
-
-
-    if not authorization.startswith("Bearer "):
-
-        raise HTTPException(
-            status_code=401,
-            detail="Authorization must use Bearer token"
-        )
-
-
-    access_token = authorization.replace(
-        "Bearer ",
-        "",
-        1
-    ).strip()
-
-
-    user = get_current_user(
-        access_token
-    )
-
+    user = get_current_user(authorization)
 
     try:
 
-        response = (
+        result = (
             supabase
             .table("chat_history")
-            .select(
-                "id, question, answer, created_at"
-            )
-            .eq(
-                "user_id",
-                user.id
-            )
-            .order(
-                "created_at",
-                desc=True
-            )
+            .select("id, question, answer, created_at")
+            .eq("user_id", user.id)
+            .order("created_at", desc=True)
             .execute()
         )
 
-
         return {
-
-            "user_id": user.id,
-
-            "conversations": response.data
-
+            "history": result.data or []
         }
-
 
     except Exception as e:
 
         raise HTTPException(
             status_code=500,
-            detail=(
-                f"Could not load chat history: {str(e)}"
-            )
+            detail=str(e)
         )
