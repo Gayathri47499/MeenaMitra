@@ -13,50 +13,41 @@ import {
 
 import "./App.css";
 
-
 const API_URL =
   import.meta.env.VITE_API_URL ||
   "http://127.0.0.1:8000";
 
 
 function App() {
-
   // ==========================================================
   // STATE
   // ==========================================================
 
-  const [isLoggedIn, setIsLoggedIn] =
-    useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
-  const [showSignup, setShowSignup] =
-    useState(false);
+  const [showSignup, setShowSignup] = useState(false);
 
-  const [email, setEmail] =
-    useState("");
+  const [email, setEmail] = useState("");
 
-  const [password, setPassword] =
-    useState("");
+  const [password, setPassword] = useState("");
 
-  const [question, setQuestion] =
-    useState("");
+  const [question, setQuestion] = useState("");
 
-  const [messages, setMessages] =
-    useState([]);
+  const [messages, setMessages] = useState([]);
 
-  const [history, setHistory] =
-    useState([]);
+  const [history, setHistory] = useState([]);
 
-  const [loading, setLoading] =
-    useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const [error, setError] =
-    useState("");
+  const [error, setError] = useState("");
 
-  const [sidebarOpen, setSidebarOpen] =
-    useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  const [activeHistoryId, setActiveHistoryId] =
-    useState(null);
+  // Currently selected conversation
+  const [activeHistoryId, setActiveHistoryId] = useState(null);
+
+  // Current conversation UUID
+  const [conversationId, setConversationId] = useState(null);
 
 
   // ==========================================================
@@ -64,36 +55,26 @@ function App() {
   // ==========================================================
 
   function saveAuthSession(data) {
-
     if (data.access_token) {
-
       localStorage.setItem(
         "meenamitra_token",
         data.access_token
       );
-
     }
 
-
     if (data.refresh_token) {
-
       localStorage.setItem(
         "meenamitra_refresh_token",
         data.refresh_token
       );
-
     }
 
-
     if (data.email) {
-
       localStorage.setItem(
         "meenamitra_email",
         data.email
       );
-
     }
-
   }
 
 
@@ -102,7 +83,6 @@ function App() {
   // ==========================================================
 
   function clearAuthSession() {
-
     localStorage.removeItem(
       "meenamitra_token"
     );
@@ -114,7 +94,6 @@ function App() {
     localStorage.removeItem(
       "meenamitra_email"
     );
-
   }
 
 
@@ -123,71 +102,52 @@ function App() {
   // ==========================================================
 
   async function refreshAccessToken() {
-
     const refreshToken =
       localStorage.getItem(
         "meenamitra_refresh_token"
       );
 
-
     if (!refreshToken) {
-
       return null;
-
     }
 
-
     try {
-
       const response = await fetch(
         `${API_URL}/refresh`,
         {
           method: "POST",
 
           headers: {
-            "Content-Type":
-              "application/json",
+            "Content-Type": "application/json",
           },
 
           body: JSON.stringify({
-            refresh_token:
-              refreshToken,
+            refresh_token: refreshToken,
           }),
         }
       );
 
-
       const data =
         await response.json();
 
-
       if (!response.ok) {
-
         clearAuthSession();
-
         return null;
-
       }
-
 
       saveAuthSession(data);
 
-
       return data.access_token;
-
     }
 
     catch (err) {
-
       console.error(
         "Token refresh error:",
         err
       );
 
       return null;
-
     }
-
   }
 
 
@@ -202,37 +162,27 @@ function App() {
     url,
     options = {}
   ) {
-
     let token =
       localStorage.getItem(
         "meenamitra_token"
       );
 
-
     if (!token) {
-
       throw new Error(
         "Please login first."
       );
-
     }
 
-
     const firstOptions = {
-
       ...options,
 
       headers: {
-
         ...(options.headers || {}),
 
         Authorization:
           `Bearer ${token}`,
-
       },
-
     };
-
 
     let response =
       await fetch(
@@ -240,53 +190,39 @@ function App() {
         firstOptions
       );
 
-
     // --------------------------------------------------------
     // ACCESS TOKEN EXPIRED
     // --------------------------------------------------------
 
     if (response.status === 401) {
-
       const newToken =
         await refreshAccessToken();
 
-
       if (!newToken) {
-
         throw new Error(
           "Your session has expired. Please login again."
         );
-
       }
 
-
       const retryOptions = {
-
         ...options,
 
         headers: {
-
           ...(options.headers || {}),
 
           Authorization:
             `Bearer ${newToken}`,
-
         },
-
       };
-
 
       response =
         await fetch(
           url,
           retryOptions
         );
-
     }
 
-
     return response;
-
   }
 
 
@@ -295,9 +231,7 @@ function App() {
   // ==========================================================
 
   useEffect(() => {
-
     async function restoreSession() {
-
       const token =
         localStorage.getItem(
           "meenamitra_token"
@@ -308,22 +242,17 @@ function App() {
           "meenamitra_refresh_token"
         );
 
-
       // Nothing stored
-
       if (!token && !refreshToken) {
-
         return;
-
       }
 
-
-      // First try existing token
+      // --------------------------------------------------------
+      // First try existing access token
+      // --------------------------------------------------------
 
       if (token) {
-
         try {
-
           const response =
             await fetch(
               `${API_URL}/history`,
@@ -335,14 +264,11 @@ function App() {
               }
             );
 
-
           if (response.ok) {
-
             setIsLoggedIn(true);
 
             const data =
               await response.json();
-
 
             setHistory(
               Array.isArray(
@@ -352,36 +278,28 @@ function App() {
                 : []
             );
 
-
             return;
-
           }
-
         }
 
         catch (err) {
-
           console.error(
             "Session check error:",
             err
           );
-
         }
-
       }
 
-
+      // --------------------------------------------------------
       // Existing token failed.
       // Try refresh token.
+      // --------------------------------------------------------
 
       if (refreshToken) {
-
         const newToken =
           await refreshAccessToken();
 
-
         if (newToken) {
-
           setIsLoggedIn(true);
 
           await loadHistory(
@@ -389,23 +307,19 @@ function App() {
           );
 
           return;
-
         }
-
       }
 
-
+      // --------------------------------------------------------
       // Both tokens failed.
+      // --------------------------------------------------------
 
       clearAuthSession();
 
       setIsLoggedIn(false);
-
     }
 
-
     restoreSession();
-
   }, []);
 
 
@@ -414,14 +328,11 @@ function App() {
   // ==========================================================
 
   async function handleSignup(e) {
-
     e.preventDefault();
 
     setError("");
 
-
     try {
-
       const response =
         await fetch(
           `${API_URL}/signup`,
@@ -437,58 +348,62 @@ function App() {
               email,
               password,
             }),
-
           }
         );
-
 
       const data =
         await response.json();
 
-
       if (!response.ok) {
-
         throw new Error(
           data.detail ||
           "Signup failed"
         );
-
       }
 
+      // --------------------------------------------------------
+      // If backend returned session immediately
+      // --------------------------------------------------------
 
       if (data.access_token) {
-
         saveAuthSession(data);
 
         setIsLoggedIn(true);
 
+        setEmail("");
+
+        setPassword("");
+
+        setMessages([]);
+
+        setConversationId(null);
+
+        setActiveHistoryId(null);
+
         await loadHistory(
           data.access_token
         );
-
       }
 
-      else {
+      // --------------------------------------------------------
+      // Email confirmation required
+      // --------------------------------------------------------
 
+      else {
         setError(
           "Signup successful. Please check your email to confirm your account, then login."
         );
 
         setShowSignup(false);
-
       }
-
     }
 
     catch (err) {
-
       setError(
         err.message ||
         "Signup failed"
       );
-
     }
-
   }
 
 
@@ -497,14 +412,11 @@ function App() {
   // ==========================================================
 
   async function handleLogin(e) {
-
     e.preventDefault();
 
     setError("");
 
-
     try {
-
       const response =
         await fetch(
           `${API_URL}/login`,
@@ -520,46 +432,42 @@ function App() {
               email,
               password,
             }),
-
           }
         );
-
 
       const data =
         await response.json();
 
-
       if (!response.ok) {
-
         throw new Error(
           data.detail ||
           "Login failed"
         );
-
       }
-
 
       saveAuthSession(data);
 
-
       setIsLoggedIn(true);
 
+      setMessages([]);
+
+      setConversationId(null);
+
+      setActiveHistoryId(null);
+
+      setPassword("");
 
       await loadHistory(
         data.access_token
       );
-
     }
 
     catch (err) {
-
       setError(
         err.message ||
         "Login failed"
       );
-
     }
-
   }
 
 
@@ -570,14 +478,10 @@ function App() {
   async function loadHistory(
     token = null
   ) {
-
     try {
-
       let response;
 
-
       if (token) {
-
         response =
           await fetch(
             `${API_URL}/history`,
@@ -588,32 +492,24 @@ function App() {
               },
             }
           );
-
       }
 
       else {
-
         response =
           await authenticatedFetch(
             `${API_URL}/history`
           );
-
       }
-
 
       const data =
         await response.json();
 
-
       if (!response.ok) {
-
         throw new Error(
           data.detail ||
           "Could not load chat history"
         );
-
       }
-
 
       setHistory(
         Array.isArray(
@@ -622,18 +518,14 @@ function App() {
           ? data.history
           : []
       );
-
     }
 
     catch (err) {
-
       console.error(
         "History loading error:",
         err
       );
-
     }
-
   }
 
 
@@ -641,30 +533,61 @@ function App() {
   // OPEN OLD CONVERSATION
   // ==========================================================
 
-  function openHistoryChat(item) {
+  function openHistoryChat(conversation) {
+    if (!conversation) {
+      return;
+    }
 
-    setActiveHistoryId(
-      item.id
+    // --------------------------------------------------------
+    // Set the selected conversation
+    // --------------------------------------------------------
+
+    setConversationId(
+      conversation.conversation_id
     );
 
-
-    setMessages([
-
-      {
-        role: "user",
-        content: item.question,
-      },
-
-      {
-        role: "assistant",
-        content: item.answer,
-      },
-
-    ]);
-
+    setActiveHistoryId(
+      conversation.conversation_id
+    );
 
     setError("");
 
+    // --------------------------------------------------------
+    // Restore every message in the conversation
+    // --------------------------------------------------------
+
+    const restoredMessages = [];
+
+    const conversationMessages =
+      Array.isArray(
+        conversation.messages
+      )
+        ? conversation.messages
+        : [];
+
+    // Backend returns newest first.
+    // Reverse it so chat displays oldest → newest.
+    conversationMessages
+      .slice()
+      .reverse()
+      .forEach((item) => {
+        restoredMessages.push({
+          role: "user",
+          content: item.question,
+        });
+
+        restoredMessages.push({
+          role: "assistant",
+          content: item.answer,
+        });
+      });
+
+    setMessages(
+      restoredMessages
+    );
+
+    // On smaller screens, close sidebar
+    setSidebarOpen(false);
   }
 
 
@@ -673,44 +596,37 @@ function App() {
   // ==========================================================
 
   async function sendMessage(e) {
-
     e.preventDefault();
-
 
     if (
       !question.trim() ||
       loading
     ) {
-
       return;
-
     }
-
 
     const token =
       localStorage.getItem(
         "meenamitra_token"
       );
 
-
     if (!token) {
-
       setError(
         "Please login first."
       );
 
       return;
-
     }
-
 
     const currentQuestion =
       question.trim();
 
+    // --------------------------------------------------------
+    // Immediately show user message
+    // --------------------------------------------------------
 
     setMessages(
       previous => [
-
         ...previous,
 
         {
@@ -718,15 +634,8 @@ function App() {
           content:
             currentQuestion,
         },
-
       ]
     );
-
-
-    setActiveHistoryId(
-      null
-    );
-
 
     setQuestion("");
 
@@ -734,14 +643,19 @@ function App() {
 
     setError("");
 
-
     try {
+      // ------------------------------------------------------
+      // IMPORTANT:
+      // Send the CURRENT conversation ID.
+      //
+      // null = create a new conversation
+      // UUID = continue existing conversation
+      // ------------------------------------------------------
 
       const response =
         await authenticatedFetch(
           `${API_URL}/chat`,
           {
-
             method: "POST",
 
             headers: {
@@ -752,29 +666,47 @@ function App() {
             body: JSON.stringify({
               question:
                 currentQuestion,
-            }),
 
+              access_token:
+                token,
+
+              conversation_id:
+                conversationId,
+            }),
           }
         );
-
 
       const data =
         await response.json();
 
-
       if (!response.ok) {
-
         throw new Error(
           data.detail ||
           "Something went wrong"
         );
-
       }
 
+      // ------------------------------------------------------
+      // Backend creates conversation ID for first question.
+      // Save it for every future question.
+      // ------------------------------------------------------
+
+      if (data.conversation_id) {
+        setConversationId(
+          data.conversation_id
+        );
+
+        setActiveHistoryId(
+          data.conversation_id
+        );
+      }
+
+      // ------------------------------------------------------
+      // Show AI response in SAME chat
+      // ------------------------------------------------------
 
       setMessages(
         previous => [
-
           ...previous,
 
           {
@@ -782,30 +714,34 @@ function App() {
             content:
               data.answer,
           },
-
         ]
       );
 
+      // ------------------------------------------------------
+      // Reload sidebar.
+      //
+      // IMPORTANT:
+      // We DO NOT reset conversationId here.
+      // ------------------------------------------------------
 
       await loadHistory();
-
     }
 
     catch (err) {
+      console.error(
+        "Chat error:",
+        err
+      );
 
       setError(
         err.message ||
         "Unable to get response"
       );
-
     }
 
     finally {
-
       setLoading(false);
-
     }
-
   }
 
 
@@ -814,9 +750,7 @@ function App() {
   // ==========================================================
 
   function logout() {
-
     clearAuthSession();
-
 
     setIsLoggedIn(false);
 
@@ -824,20 +758,35 @@ function App() {
 
     setHistory([]);
 
+    setConversationId(null);
+
     setActiveHistoryId(null);
 
     setQuestion("");
 
-    setError("");
+    setEmail("");
 
+    setPassword("");
+
+    setError("");
   }
 
 
   // ==========================================================
-  // NEW CHAT
+  // NEW CONVERSATION
   // ==========================================================
 
   function newChat() {
+    // --------------------------------------------------------
+    // THIS IS VERY IMPORTANT
+    //
+    // Setting conversationId to null tells the backend:
+    // "The next question is a brand-new conversation."
+    // --------------------------------------------------------
+
+    setConversationId(null);
+
+    setActiveHistoryId(null);
 
     setMessages([]);
 
@@ -845,8 +794,7 @@ function App() {
 
     setError("");
 
-    setActiveHistoryId(null);
-
+    setSidebarOpen(false);
   }
 
 
@@ -855,60 +803,39 @@ function App() {
   // ==========================================================
 
   if (!isLoggedIn) {
-
     return (
-
       <div className="auth-page">
 
         <div className="auth-card">
 
           <div className="logo-circle">
-
             <Fish size={38} />
-
           </div>
-
 
           <h1>
-
             Meena<span>Mitra</span>
-
           </h1>
 
-
           <p className="tagline">
-
             Your intelligent aquaculture companion
-
           </p>
 
-
           <div className="ai-badge">
-
             <Sparkles size={15} />
-
             AI-powered fish farming advisor
-
           </div>
 
-
           <h2>
-
             {showSignup
               ? "Create your account"
               : "Welcome back"}
-
           </h2>
 
-
           <p className="auth-description">
-
             {showSignup
               ? "Create your MeenaMitra account to save your conversations."
               : "Sign in to continue your fish-farming journey."}
-
           </p>
-
 
           <form
             onSubmit={
@@ -930,7 +857,6 @@ function App() {
               required
             />
 
-
             <input
               type="password"
               placeholder="Password"
@@ -944,57 +870,42 @@ function App() {
               required
             />
 
-
             {error && (
-
               <div className="error">
-
                 {error}
-
               </div>
-
             )}
-
 
             <button
               className="primary-button"
               type="submit"
             >
-
               {showSignup
                 ? "Create Account"
                 : "Login"}
-
             </button>
 
           </form>
 
-
           <button
             className="switch-button"
             onClick={() => {
-
               setShowSignup(
                 !showSignup
               );
 
               setError("");
-
             }}
           >
-
             {showSignup
               ? "Already have an account? Login"
               : "New to MeenaMitra? Create an account"}
-
           </button>
 
         </div>
 
       </div>
-
     );
-
   }
 
 
@@ -1003,9 +914,7 @@ function App() {
   // ==========================================================
 
   return (
-
     <div className="app">
-
 
       {/* ======================================================
           SIDEBAR
@@ -1024,9 +933,7 @@ function App() {
           <div className="brand-small">
 
             <div className="small-logo">
-
               <Fish size={22} />
-
             </div>
 
             <span>
@@ -1035,32 +942,31 @@ function App() {
 
           </div>
 
-
           <button
             className="icon-button"
             onClick={() =>
               setSidebarOpen(false)
             }
           >
-
             <X size={19} />
-
           </button>
 
         </div>
 
 
+        {/* NEW CONVERSATION */}
+
         <button
           className="new-chat-button"
           onClick={newChat}
         >
-
           <Plus size={18} />
 
           New conversation
-
         </button>
 
+
+        {/* HISTORY TITLE */}
 
         <div className="history-title">
 
@@ -1070,6 +976,8 @@ function App() {
 
         </div>
 
+
+        {/* HISTORY LIST */}
 
         <div className="history-list">
 
@@ -1088,23 +996,25 @@ function App() {
           ) : (
 
             history.map(
-              item => (
+              (conversation) => (
 
                 <button
                   type="button"
 
+                  key={
+                    conversation.conversation_id
+                  }
+
                   className={
                     activeHistoryId ===
-                    item.id
+                    conversation.conversation_id
                       ? "history-item active"
                       : "history-item"
                   }
 
-                  key={item.id}
-
                   onClick={() =>
                     openHistoryChat(
-                      item
+                      conversation
                     )
                   }
                 >
@@ -1115,7 +1025,10 @@ function App() {
 
                   <span>
 
-                    {item.question}
+                    {conversation.title ||
+  (conversation.messages?.length > 0
+    ? conversation.messages[0].question
+    : "Conversation")}
 
                   </span>
 
@@ -1129,6 +1042,8 @@ function App() {
         </div>
 
 
+        {/* SIDEBAR BOTTOM */}
+
         <div className="sidebar-bottom">
 
           <div className="advisor-status">
@@ -1138,7 +1053,6 @@ function App() {
             MeenaMitra AI online
 
           </div>
-
 
           <button
             className="logout-button"
@@ -1172,13 +1086,10 @@ function App() {
                 setSidebarOpen(true)
               }
             >
-
               <Menu size={22} />
-
             </button>
 
           )}
-
 
           <div>
 
@@ -1195,6 +1106,10 @@ function App() {
         </header>
 
 
+        {/* ====================================================
+            MESSAGES
+        ==================================================== */}
+
         <section className="messages">
 
           {messages.length === 0 ? (
@@ -1202,25 +1117,17 @@ function App() {
             <div className="welcome">
 
               <div className="welcome-icon">
-
                 <Fish size={48} />
-
               </div>
 
-
               <h1>
-
                 How can I help your pond today?
-
               </h1>
 
-
               <p>
-
                 Ask me about water quality,
                 feeding, fish health,
                 pond management and more.
-
               </p>
 
 
@@ -1233,9 +1140,7 @@ function App() {
                     )
                   }
                 >
-
                   💧 Low dissolved oxygen
-
                 </button>
 
 
@@ -1246,9 +1151,7 @@ function App() {
                     )
                   }
                 >
-
                   🐟 Feeding schedule
-
                 </button>
 
 
@@ -1259,9 +1162,7 @@ function App() {
                     )
                   }
                 >
-
                   🩺 Fish health
-
                 </button>
 
 
@@ -1272,9 +1173,7 @@ function App() {
                     )
                   }
                 >
-
                   🌊 Fish behavior
-
                 </button>
 
               </div>
@@ -1332,6 +1231,8 @@ function App() {
           )}
 
 
+          {/* LOADING */}
+
           {loading && (
 
             <div className="message assistant-message">
@@ -1340,21 +1241,17 @@ function App() {
                 🐟
               </div>
 
-
               <div className="message-content">
 
                 <div className="message-name">
                   MeenaMitra
                 </div>
 
-
                 <div className="typing">
-
                   Thinking
                   <span>.</span>
                   <span>.</span>
                   <span>.</span>
-
                 </div>
 
               </div>
@@ -1366,16 +1263,20 @@ function App() {
         </section>
 
 
+        {/* ERROR */}
+
         {error && (
 
           <div className="chat-error">
-
             {error}
-
           </div>
 
         )}
 
+
+        {/* ====================================================
+            CHAT INPUT
+        ==================================================== */}
 
         <form
           className="chat-input-area"
@@ -1448,9 +1349,7 @@ function App() {
       </main>
 
     </div>
-
   );
-
 }
 
 
