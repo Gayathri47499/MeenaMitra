@@ -1,38 +1,68 @@
 import os
+import uuid
+
 import httpx
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from supabase import create_client, Client
 
 
 # ==========================================================
-# ENVIRONMENT VARIABLES
+# LOAD ENVIRONMENT VARIABLES
 # ==========================================================
 
 load_dotenv()
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY")
-MODEL_URL = os.getenv("MEENAMITRA_MODEL_URL")
-MODEL_API_KEY = os.getenv("MEENAMITRA_MODEL_API_KEY")
 
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+
+SUPABASE_PUBLISHABLE_KEY = os.getenv(
+    "SUPABASE_PUBLISHABLE_KEY"
+)
+
+MODEL_URL = os.getenv(
+    "MEENAMITRA_MODEL_URL"
+)
+
+MODEL_API_KEY = os.getenv(
+    "MEENAMITRA_MODEL_API_KEY"
+)
+
+
+# ==========================================================
+# VALIDATE ENVIRONMENT VARIABLES
+# ==========================================================
 
 if not SUPABASE_URL:
-    raise RuntimeError("SUPABASE_URL is missing")
+    raise RuntimeError(
+        "SUPABASE_URL is missing"
+    )
 
 
 if not SUPABASE_PUBLISHABLE_KEY:
-    raise RuntimeError("SUPABASE_PUBLISHABLE_KEY is missing")
+    raise RuntimeError(
+        "SUPABASE_PUBLISHABLE_KEY is missing"
+    )
 
 
 if not MODEL_URL:
-    raise RuntimeError("MEENAMITRA_MODEL_URL is missing")
+    raise RuntimeError(
+        "MEENAMITRA_MODEL_URL is missing"
+    )
+
 
 if not MODEL_API_KEY:
-    raise RuntimeError("MEENAMITRA_MODEL_API_KEY is missing")
+    raise RuntimeError(
+        "MEENAMITRA_MODEL_API_KEY is missing"
+    )
+
+
+# ==========================================================
+# SUPABASE CLIENT
+# ==========================================================
 
 supabase: Client = create_client(
     SUPABASE_URL,
@@ -41,12 +71,12 @@ supabase: Client = create_client(
 
 
 # ==========================================================
-# FASTAPI
+# FASTAPI APP
 # ==========================================================
 
 app = FastAPI(
     title="MeenaMitra API",
-    description="AI fish-farming advisor API",
+    description="AI-powered aquaculture advisor",
     version="1.0.0"
 )
 
@@ -57,9 +87,20 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+    ],
+
+    allow_origin_regex=r"https://.*\.vercel\.app",
+
+    allow_credentials=True,
+
     allow_methods=["*"],
+
     allow_headers=["*"],
 )
 
@@ -73,12 +114,57 @@ class AuthRequest(BaseModel):
     password: str
 
 
-class ChatRequest(BaseModel):
-    question: str
-
-
 class RefreshRequest(BaseModel):
     refresh_token: str
+
+
+class ChatRequest(BaseModel):
+    question: str
+    access_token: str
+    conversation_id: str | None = None
+
+
+# ==========================================================
+# TELUGU LANGUAGE DETECTION
+# ==========================================================
+
+def contains_telugu(text: str) -> bool:
+    """
+    Detect Telugu Unicode characters.
+
+    Telugu Unicode range:
+    U+0C00 - U+0C7F
+    """
+
+    return any(
+        "\u0c00" <= char <= "\u0c7f"
+        for char in text
+    )
+
+
+def get_language_instruction(
+    question: str
+) -> str:
+
+    if contains_telugu(question):
+
+        return (
+            "LANGUAGE REQUIREMENT:\n"
+            "The user wrote the question in Telugu.\n"
+            "You MUST answer entirely in natural Telugu script.\n"
+            "Do NOT answer in English.\n"
+            "Do NOT translate the question into English.\n"
+            "Do NOT mix English sentences with Telugu.\n"
+            "Technical abbreviations such as pH, DO and ppm may remain "
+            "in their standard form when necessary.\n"
+            "The main explanation must be in Telugu."
+        )
+
+    return (
+        "LANGUAGE REQUIREMENT:\n"
+        "The user wrote the question in English.\n"
+        "Answer in clear, simple English."
+    )
 
 
 # ==========================================================
@@ -106,6 +192,12 @@ def health():
     }
 
 
+@app.head("/health")
+def health_head():
+
+    return None
+
+
 # ==========================================================
 # SIGNUP
 # ==========================================================
@@ -115,45 +207,41 @@ def signup(data: AuthRequest):
 
     try:
 
-        result = supabase.auth.sign_up({
-            "email": data.email,
-            "password": data.password
-        })
+        result = supabase.auth.sign_up(
+            {
+                "email": data.email,
+                "password": data.password
+            }
+        )
 
+        session = result.session
+        user = result.user
 
-        if not result.user:
-
+        if not user:
             raise HTTPException(
                 status_code=400,
                 detail="Signup failed"
             )
 
-
         response = {
             "message": "Signup successful",
-            "user_id": result.user.id
+            "email": user.email
         }
 
-
-        # If Supabase immediately provides a session
-        if result.session:
+        if session:
 
             response["access_token"] = (
-                result.session.access_token
+                session.access_token
             )
 
             response["refresh_token"] = (
-                result.session.refresh_token
+                session.refresh_token
             )
-
 
         return response
 
-
     except HTTPException:
-
         raise
-
 
     except Exception as e:
 
@@ -172,21 +260,21 @@ def login(data: AuthRequest):
 
     try:
 
-        result = supabase.auth.sign_in_with_password({
-            "email": data.email,
-            "password": data.password
-        })
-
+        result = supabase.auth.sign_in_with_password(
+            {
+                "email": data.email,
+                "password": data.password
+            }
+        )
 
         if not result.session:
-
             raise HTTPException(
                 status_code=401,
-                detail="Invalid email or password"
+                detail="Login failed"
             )
 
-
         return {
+            "message": "Login successful",
 
             "access_token":
                 result.session.access_token,
@@ -194,18 +282,14 @@ def login(data: AuthRequest):
             "refresh_token":
                 result.session.refresh_token,
 
-            "user_id":
-                result.user.id,
-
             "email":
                 result.user.email
+                if result.user
+                else data.email
         }
 
-
     except HTTPException:
-
         raise
-
 
     except Exception as e:
 
@@ -220,7 +304,9 @@ def login(data: AuthRequest):
 # ==========================================================
 
 @app.post("/refresh")
-def refresh_token(data: RefreshRequest):
+def refresh_token(
+    data: RefreshRequest
+):
 
     try:
 
@@ -228,16 +314,15 @@ def refresh_token(data: RefreshRequest):
             data.refresh_token
         )
 
-
         if not result.session:
 
             raise HTTPException(
                 status_code=401,
-                detail="Refresh token is invalid or expired"
+                detail="Could not refresh session"
             )
 
-
         return {
+            "message": "Token refreshed",
 
             "access_token":
                 result.session.access_token,
@@ -245,91 +330,20 @@ def refresh_token(data: RefreshRequest):
             "refresh_token":
                 result.session.refresh_token,
 
-            "user_id":
-                result.user.id,
-
             "email":
                 result.user.email
+                if result.user
+                else None
         }
 
-
     except HTTPException:
-
         raise
-
 
     except Exception as e:
 
-        print(
-            "TOKEN REFRESH ERROR:",
-            repr(e)
-        )
-
         raise HTTPException(
             status_code=401,
-            detail="Refresh token is invalid or expired"
-        )
-
-
-# ==========================================================
-# GET CURRENT USER
-# ==========================================================
-
-def get_current_user(
-    authorization: str
-):
-
-    if not authorization:
-
-        raise HTTPException(
-            status_code=401,
-            detail="Authorization header missing"
-        )
-
-
-    if not authorization.startswith("Bearer "):
-
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid authorization header"
-        )
-
-
-    token = authorization.replace(
-        "Bearer ",
-        "",
-        1
-    )
-
-
-    try:
-
-        user_response = (
-            supabase.auth.get_user(token)
-        )
-
-
-        if not user_response.user:
-
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid token"
-            )
-
-
-        return user_response.user
-
-
-    except HTTPException:
-
-        raise
-
-
-    except Exception:
-
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid or expired token"
+            detail=str(e)
         )
 
 
@@ -338,18 +352,9 @@ def get_current_user(
 # ==========================================================
 
 @app.post("/chat")
-async def chat(
-    data: ChatRequest,
-    authorization: str = Header(default="")
-):
-
-    user = get_current_user(
-        authorization
-    )
-
+async def chat(data: ChatRequest):
 
     question = data.question.strip()
-
 
     if not question:
 
@@ -360,251 +365,507 @@ async def chat(
 
 
     # ======================================================
-    # MEENAMITRA SYSTEM PROMPT
-    # ======================================================
-
-    system_prompt = """
-You are MeenaMitra, an AI advisor specialized in
-small-scale pond-based fish farming and aquaculture.
-
-Answer specifically for fish farmers and pond aquaculture.
-
-Do not discuss aquariums unless the user explicitly asks
-about aquariums.
-
-Give practical, simple and useful advice.
-
-Consider fish species, fish size, fish biomass, water
-temperature, dissolved oxygen, pH, ammonia, feed quantity,
-feeding frequency, pond conditions and fish health when
-relevant.
-
-If important information is missing, say what information
-is needed instead of inventing exact values.
-
-Keep answers clear and concise.
-
-You can answer in English or Telugu depending on the
-language used by the farmer.
-"""
-
-
-    payload = {
-    "model": "meenamitra",
-    "messages": [
-        {
-            "role": "system",
-            "content": (
-                "You are MeenaMitra, a specialized AI advisor for "
-                "small-scale pond-based fish farming and aquaculture.\n\n"
-
-                "Your job is to give practical, safe and understandable "
-                "advice to fish farmers.\n\n"
-
-                "IMPORTANT RULES:\n"
-                "1. Answer only the farmer's question.\n"
-                "2. Stay focused on pond fish farming and aquaculture.\n"
-                "3. Do not discuss aquariums unless the user explicitly asks "
-                "about aquariums.\n"
-                "4. Use simple and natural language.\n"
-                "5. Answer in English when the farmer asks in English.\n"
-                "6. Answer in Telugu when the farmer asks in Telugu.\n"
-                "7. Never mix unrelated languages in the same answer.\n"
-                "8. Never generate Chinese, Korean, Japanese or other "
-                "unrequested languages.\n"
-                "9. Never output programming code, HTML, CSS, JavaScript "
-                "or UI code unless explicitly requested.\n"
-                "10. Do not invent exact measurements when important "
-                "information is missing.\n"
-                "11. When necessary, ask for fish species, fish size, "
-                "pond size, water temperature, pH, dissolved oxygen, "
-                "ammonia or other relevant information.\n"
-                "12. Give practical recommendations that a small-scale "
-                "fish farmer can understand and apply.\n"
-                "13. Keep the response concise but useful.\n\n"
-
-                "Consider fish species, fish size, fish biomass, feeding "
-                "frequency, water quality, dissolved oxygen, pH, ammonia, "
-                "temperature, pond conditions and fish health whenever "
-                "relevant."
-            )
-        },
-        {
-            "role": "user",
-            "content": question
-        }
-    ],
-    "temperature": 0.25,
-    "top_p": 0.9,
-    "repeat_penalty": 1.1,
-    "max_tokens": 250
-}
-
-
-    # ======================================================
-    # CALL AWS MODEL
+    # 1. VERIFY USER
     # ======================================================
 
     try:
 
-        async with httpx.AsyncClient(
+        user_result = supabase.auth.get_user(
+            data.access_token
+        )
 
-            timeout=httpx.Timeout(
-                connect=10.0,
-                read=180.0,
-                write=30.0,
-                pool=30.0
+        if not user_result or not user_result.user:
+
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid authentication token"
             )
 
+        user_id = user_result.user.id
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=401,
+            detail=f"Authentication failed: {str(e)}"
+        )
+
+
+    # ======================================================
+    # 2. GET OR CREATE CONVERSATION ID
+    # ======================================================
+
+    if data.conversation_id:
+
+        conversation_id = data.conversation_id
+
+        # --------------------------------------------------
+        # Verify that the conversation belongs to this user
+        # --------------------------------------------------
+
+        try:
+
+            existing = (
+                supabase
+                .table("chat_history")
+                .select("id")
+                .eq(
+                    "conversation_id",
+                    conversation_id
+                )
+                .eq(
+                    "user_id",
+                    user_id
+                )
+                .limit(1)
+                .execute()
+            )
+
+            if not existing.data:
+
+                raise HTTPException(
+                    status_code=403,
+                    detail="Conversation does not belong to this user"
+                )
+
+        except HTTPException:
+            raise
+
+        except Exception as e:
+
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Could not verify conversation: "
+                    f"{str(e)}"
+                )
+            )
+
+    else:
+
+        # --------------------------------------------------
+        # FIRST MESSAGE OF NEW CONVERSATION
+        # --------------------------------------------------
+
+        conversation_id = str(
+            uuid.uuid4()
+        )
+
+
+    # ======================================================
+    # 3. LOAD PREVIOUS MESSAGES
+    # ======================================================
+
+    try:
+
+        previous_result = (
+            supabase
+            .table("chat_history")
+            .select(
+                "question, answer, created_at"
+            )
+            .eq(
+                "conversation_id",
+                conversation_id
+            )
+            .eq(
+                "user_id",
+                user_id
+            )
+            .order(
+                "created_at",
+                desc=False
+            )
+            .limit(8)
+            .execute()
+        )
+
+        previous_messages = (
+            previous_result.data or []
+        )
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Could not load conversation history: "
+                f"{str(e)}"
+            )
+        )
+
+
+    # ======================================================
+    # 4. LANGUAGE
+    # ======================================================
+
+    language_instruction = (
+        get_language_instruction(
+            question
+        )
+    )
+
+
+    # ======================================================
+    # 5. SYSTEM PROMPT
+    # ======================================================
+
+    system_prompt = (
+
+        "You are MeenaMitra, a specialized AI advisor "
+        "for small-scale pond-based fish farming and "
+        "aquaculture.\n\n"
+
+        "Your purpose is to provide practical, safe and "
+        "understandable advice to fish farmers.\n\n"
+
+        "IMPORTANT RULES:\n"
+
+        "1. Answer the farmer's actual question.\n"
+
+        "2. Stay focused on pond fish farming and "
+        "aquaculture.\n"
+
+        "3. Do not discuss aquariums unless explicitly "
+        "asked.\n"
+
+        "4. Give simple and practical advice.\n"
+
+        "5. Do not invent exact values when important "
+        "information is missing.\n"
+
+        "6. Consider fish species, fish size, biomass, "
+        "pond size, temperature, dissolved oxygen, pH, "
+        "ammonia, feeding and pond conditions when "
+        "relevant.\n"
+
+        "7. If important information is missing, explain "
+        "what information the farmer should provide.\n"
+
+        "8. Never generate programming code unless "
+        "explicitly requested.\n"
+
+        "9. Never generate unrelated languages.\n"
+
+        "10. Keep answers concise but useful.\n\n"
+
+        + language_instruction
+    )
+
+
+    # ======================================================
+    # 6. BUILD MODEL MESSAGES
+    # ======================================================
+
+    messages = [
+        {
+            "role": "system",
+            "content": system_prompt
+        }
+    ]
+
+
+    # ------------------------------------------------------
+    # Previous conversation context
+    # ------------------------------------------------------
+
+    for item in previous_messages:
+
+        messages.append(
+            {
+                "role": "user",
+                "content": item["question"]
+            }
+        )
+
+        messages.append(
+            {
+                "role": "assistant",
+                "content": item["answer"]
+            }
+        )
+
+
+    # ------------------------------------------------------
+    # Current question
+    # ------------------------------------------------------
+
+    messages.append(
+        {
+            "role": "user",
+            "content": question
+        }
+    )
+
+
+    # ======================================================
+    # 7. MODEL REQUEST
+    # ======================================================
+
+    payload = {
+
+        "model": "meenamitra",
+
+        "messages": messages,
+
+        "temperature": 0.25,
+
+        "top_p": 0.9,
+
+        "repeat_penalty": 1.1,
+
+        "max_tokens": 250
+    }
+
+
+    try:
+
+        timeout = httpx.Timeout(
+
+            connect=10.0,
+
+            read=180.0,
+
+            write=30.0,
+
+            pool=30.0
+        )
+
+
+        async with httpx.AsyncClient(
+            timeout=timeout
         ) as client:
 
             response = await client.post(
-    f"{MODEL_URL.rstrip('/')}/v1/chat/completions",
-    headers={
-        "Authorization": f"Bearer {MODEL_API_KEY}"
-    },
-    json=payload
-)
+
+                f"{MODEL_URL.rstrip('/')}"
+                "/v1/chat/completions",
+
+                headers={
+                    "Authorization":
+                        f"Bearer {MODEL_API_KEY}"
+                },
+
+                json=payload
+            )
 
 
-            response.raise_for_status()
+            if response.status_code != 200:
+
+                raise HTTPException(
+
+                    status_code=502,
+
+                    detail=(
+                        "Model server error: "
+                        f"{response.text}"
+                    )
+                )
 
 
             result = response.json()
 
 
-            answer = (
-                result["choices"][0]["message"]["content"]
-                .strip()
-            )
+            try:
+
+                answer = (
+                    result["choices"][0]
+                    ["message"]
+                    ["content"]
+                    .strip()
+                )
+
+            except (
+                KeyError,
+                IndexError,
+                TypeError
+            ):
+
+                raise HTTPException(
+
+                    status_code=502,
+
+                    detail=(
+                        "Unexpected response "
+                        "from model server"
+                    )
+                )
 
 
-    except httpx.ConnectError:
-
-        raise HTTPException(
-
-            status_code=503,
-
-            detail=(
-                "MeenaMitra model server is unreachable. "
-                "Please make sure the AWS model server is running."
-            )
-        )
-
-
-    except httpx.TimeoutException:
-
-        raise HTTPException(
-
-            status_code=504,
-
-            detail=(
-                "MeenaMitra model took too long to respond."
-            )
-        )
-
+    except HTTPException:
+        raise
 
     except Exception as e:
-
-        print(
-            "MODEL ERROR:",
-            repr(e)
-        )
-
 
         raise HTTPException(
 
             status_code=500,
 
             detail=(
-                "MeenaMitra model failed "
-                "to generate a response."
+                "Model request failed: "
+                f"{str(e)}"
             )
         )
 
 
     # ======================================================
-    # SAVE CHAT HISTORY
+    # 8. SAVE TO SUPABASE
     # ======================================================
 
     try:
 
-        supabase.table(
-            "chat_history"
-        ).insert({
+        save_result = (
 
-            "user_id": user.id,
+            supabase
 
-            "question": question,
+            .table("chat_history")
 
-            "answer": answer
+            .insert(
+                {
+                    "user_id":
+                        user_id,
 
-        }).execute()
+                    "conversation_id":
+                        conversation_id,
+
+                    "question":
+                        question,
+
+                    "answer":
+                        answer
+                }
+            )
+
+            .execute()
+        )
+
+
+        if not save_result.data:
+
+            raise Exception(
+                "Supabase did not return saved record"
+            )
 
 
     except Exception as e:
 
         print(
             "HISTORY SAVE ERROR:",
-            repr(e)
+            str(e)
+        )
+
+        # IMPORTANT:
+        # Do not silently return success if the
+        # database save failed.
+
+        raise HTTPException(
+
+            status_code=500,
+
+            detail=(
+                "AI answered successfully, but "
+                "the conversation could not be saved: "
+                f"{str(e)}"
+            )
         )
 
 
     # ======================================================
-    # RETURN
+    # 9. RETURN RESPONSE
     # ======================================================
 
     return {
 
-        "question": question,
+        "conversation_id":
+            conversation_id,
 
-        "answer": answer
+        "question":
+            question,
 
+        "answer":
+            answer
     }
 
 
 # ==========================================================
-# CHAT HISTORY
+# HISTORY
 # ==========================================================
 
 @app.get("/history")
 def history(
-    authorization: str = Header(default="")
+    access_token: str
 ):
 
-    user = get_current_user(
-        authorization
-    )
+    # ======================================================
+    # 1. VERIFY USER
+    # ======================================================
 
+    try:
+
+        user_result = supabase.auth.get_user(
+            access_token
+        )
+
+        if not user_result or not user_result.user:
+
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid authentication token"
+            )
+
+        user_id = user_result.user.id
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=401,
+            detail=f"Authentication failed: {str(e)}"
+        )
+
+
+    # ======================================================
+    # 2. LOAD ALL USER HISTORY
+    # ======================================================
 
     try:
 
         result = (
 
             supabase
+
             .table("chat_history")
+
             .select(
-                "id, question, answer, created_at"
+                """
+                id,
+                conversation_id,
+                question,
+                answer,
+                created_at
+                """
             )
+
             .eq(
                 "user_id",
-                user.id
+                user_id
             )
+
             .order(
                 "created_at",
                 desc=True
             )
-            .execute()
 
+            .execute()
         )
 
 
-        return {
-
-            "history":
-                result.data or []
-
-        }
+        rows = result.data or []
 
 
     except Exception as e:
@@ -613,6 +874,69 @@ def history(
 
             status_code=500,
 
-            detail=str(e)
-
+            detail=(
+                "Failed to load chat history: "
+                f"{str(e)}"
+            )
         )
+
+
+    # ======================================================
+    # 3. GROUP MESSAGES BY CONVERSATION
+    # ======================================================
+
+    conversations = {}
+
+
+    for row in rows:
+
+        cid = row["conversation_id"]
+
+
+        if cid not in conversations:
+
+            conversations[cid] = {
+
+                "conversation_id":
+                    cid,
+
+                "title":
+                    row["question"],
+
+                "created_at":
+                    row["created_at"],
+
+                "messages":
+                    []
+            }
+
+
+        conversations[cid]["messages"].append(
+
+            {
+                "id":
+                    row["id"],
+
+                "question":
+                    row["question"],
+
+                "answer":
+                    row["answer"],
+
+                "created_at":
+                    row["created_at"]
+            }
+        )
+
+
+    # ======================================================
+    # 4. RETURN GROUPED CONVERSATIONS
+    # ======================================================
+
+    return {
+
+        "history":
+            list(
+                conversations.values()
+            )
+    }
