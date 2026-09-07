@@ -17,6 +17,7 @@ load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY")
 MODEL_URL = os.getenv("MEENAMITRA_MODEL_URL")
+MODEL_API_KEY = os.getenv("MEENAMITRA_MODEL_API_KEY")
 
 
 if not SUPABASE_URL:
@@ -30,6 +31,8 @@ if not SUPABASE_PUBLISHABLE_KEY:
 if not MODEL_URL:
     raise RuntimeError("MEENAMITRA_MODEL_URL is missing")
 
+if not MODEL_API_KEY:
+    raise RuntimeError("MEENAMITRA_MODEL_API_KEY is missing")
 
 supabase: Client = create_client(
     SUPABASE_URL,
@@ -428,13 +431,12 @@ language used by the farmer.
         ) as client:
 
             response = await client.post(
-
-                f"{MODEL_URL.rstrip('/')}"
-                "/v1/chat/completions",
-
-                json=payload
-
-            )
+    f"{MODEL_URL.rstrip('/')}/v1/chat/completions",
+    headers={
+        "Authorization": f"Bearer {MODEL_API_KEY}"
+    },
+    json=payload
+)
 
 
             response.raise_for_status()
