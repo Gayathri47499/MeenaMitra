@@ -4,7 +4,7 @@ import uuid
 import httpx
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from supabase import create_client, Client
@@ -796,11 +796,38 @@ async def chat(data: ChatRequest):
 
 @app.get("/history")
 def history(
-    access_token: str
+    authorization: str | None = Header(default=None)
 ):
 
     # ======================================================
-    # 1. VERIFY USER
+    # 1. GET ACCESS TOKEN FROM AUTHORIZATION HEADER
+    # ======================================================
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Authorization header is missing"
+        )
+
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authorization header"
+        )
+
+    access_token = authorization[
+        len("Bearer "):
+    ].strip()
+
+    if not access_token:
+        raise HTTPException(
+            status_code=401,
+            detail="Access token is missing"
+        )
+
+
+    # ======================================================
+    # 2. VERIFY USER
     # ======================================================
 
     try:
@@ -809,7 +836,10 @@ def history(
             access_token
         )
 
-        if not user_result or not user_result.user:
+        if (
+            not user_result
+            or not user_result.user
+        ):
 
             raise HTTPException(
                 status_code=401,
@@ -830,50 +860,34 @@ def history(
 
 
     # ======================================================
-    # 2. LOAD ALL USER HISTORY
+    # 3. LOAD USER'S CHAT HISTORY
     # ======================================================
 
     try:
 
         result = (
-
             supabase
-
             .table("chat_history")
-
             .select(
-                """
-                id,
-                conversation_id,
-                question,
-                answer,
-                created_at
-                """
+                "id, conversation_id, question, answer, created_at"
             )
-
             .eq(
                 "user_id",
                 user_id
             )
-
             .order(
                 "created_at",
                 desc=True
             )
-
             .execute()
         )
 
-
         rows = result.data or []
-
 
     except Exception as e:
 
         raise HTTPException(
-
             status_code=500,
-
             detail=(
                 "Failed to load chat history: "
                 f"{str(e)}"
@@ -882,7 +896,7 @@ def history(
 
 
     # ======================================================
-    # 3. GROUP MESSAGES BY CONVERSATION
+    # 4. GROUP MESSAGES BY CONVERSATION
     # ======================================================
 
     conversations = {}
@@ -890,15 +904,19 @@ def history(
 
     for row in rows:
 
-        cid = row["conversation_id"]
+        conversation_id = row[
+            "conversation_id"
+        ]
 
 
-        if cid not in conversations:
+        if conversation_id not in conversations:
 
-            conversations[cid] = {
+            conversations[
+                conversation_id
+            ] = {
 
                 "conversation_id":
-                    cid,
+                    conversation_id,
 
                 "title":
                     row["question"],
@@ -911,7 +929,9 @@ def history(
             }
 
 
-        conversations[cid]["messages"].append(
+        conversations[
+            conversation_id
+        ]["messages"].append(
 
             {
                 "id":
@@ -930,11 +950,10 @@ def history(
 
 
     # ======================================================
-    # 4. RETURN GROUPED CONVERSATIONS
+    # 5. RETURN GROUPED HISTORY
     # ======================================================
 
     return {
-
         "history":
             list(
                 conversations.values()
