@@ -390,27 +390,55 @@ language used by the farmer.
 
 
     payload = {
+    "model": "meenamitra",
+    "messages": [
+        {
+            "role": "system",
+            "content": (
+                "You are MeenaMitra, a specialized AI advisor for "
+                "small-scale pond-based fish farming and aquaculture.\n\n"
 
-        "model": "meenamitra",
+                "Your job is to give practical, safe and understandable "
+                "advice to fish farmers.\n\n"
 
-        "messages": [
+                "IMPORTANT RULES:\n"
+                "1. Answer only the farmer's question.\n"
+                "2. Stay focused on pond fish farming and aquaculture.\n"
+                "3. Do not discuss aquariums unless the user explicitly asks "
+                "about aquariums.\n"
+                "4. Use simple and natural language.\n"
+                "5. Answer in English when the farmer asks in English.\n"
+                "6. Answer in Telugu when the farmer asks in Telugu.\n"
+                "7. Never mix unrelated languages in the same answer.\n"
+                "8. Never generate Chinese, Korean, Japanese or other "
+                "unrequested languages.\n"
+                "9. Never output programming code, HTML, CSS, JavaScript "
+                "or UI code unless explicitly requested.\n"
+                "10. Do not invent exact measurements when important "
+                "information is missing.\n"
+                "11. When necessary, ask for fish species, fish size, "
+                "pond size, water temperature, pH, dissolved oxygen, "
+                "ammonia or other relevant information.\n"
+                "12. Give practical recommendations that a small-scale "
+                "fish farmer can understand and apply.\n"
+                "13. Keep the response concise but useful.\n\n"
 
-            {
-                "role": "system",
-                "content": system_prompt
-            },
-
-            {
-                "role": "user",
-                "content": question
-            }
-
-        ],
-
-        "temperature": 0.7,
-
-        "max_tokens": 300
-    }
+                "Consider fish species, fish size, fish biomass, feeding "
+                "frequency, water quality, dissolved oxygen, pH, ammonia, "
+                "temperature, pond conditions and fish health whenever "
+                "relevant."
+            )
+        },
+        {
+            "role": "user",
+            "content": question
+        }
+    ],
+    "temperature": 0.25,
+    "top_p": 0.9,
+    "repeat_penalty": 1.1,
+    "max_tokens": 250
+}
 
 
     # ======================================================
