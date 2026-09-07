@@ -15,7 +15,8 @@ import "./App.css";
 
 
 const API_URL =
-  import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+  import.meta.env.VITE_API_URL ||
+  "http://127.0.0.1:8000";
 
 
 function App() {
@@ -24,45 +25,386 @@ function App() {
   // STATE
   // ==========================================================
 
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] =
+    useState(false);
 
-  const [showSignup, setShowSignup] = useState(false);
+  const [showSignup, setShowSignup] =
+    useState(false);
 
-  const [email, setEmail] = useState("");
+  const [email, setEmail] =
+    useState("");
 
-  const [password, setPassword] = useState("");
+  const [password, setPassword] =
+    useState("");
 
-  const [question, setQuestion] = useState("");
+  const [question, setQuestion] =
+    useState("");
 
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] =
+    useState([]);
 
-  const [history, setHistory] = useState([]);
+  const [history, setHistory] =
+    useState([]);
 
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] =
+    useState(false);
 
-  const [error, setError] = useState("");
+  const [error, setError] =
+    useState("");
 
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] =
+    useState(true);
 
-  const [activeHistoryId, setActiveHistoryId] = useState(null);
+  const [activeHistoryId, setActiveHistoryId] =
+    useState(null);
 
 
   // ==========================================================
-  // RESTORE LOGIN SESSION WHEN PAGE IS REFRESHED
+  // SAVE AUTH SESSION
+  // ==========================================================
+
+  function saveAuthSession(data) {
+
+    if (data.access_token) {
+
+      localStorage.setItem(
+        "meenamitra_token",
+        data.access_token
+      );
+
+    }
+
+
+    if (data.refresh_token) {
+
+      localStorage.setItem(
+        "meenamitra_refresh_token",
+        data.refresh_token
+      );
+
+    }
+
+
+    if (data.email) {
+
+      localStorage.setItem(
+        "meenamitra_email",
+        data.email
+      );
+
+    }
+
+  }
+
+
+  // ==========================================================
+  // CLEAR AUTH SESSION
+  // ==========================================================
+
+  function clearAuthSession() {
+
+    localStorage.removeItem(
+      "meenamitra_token"
+    );
+
+    localStorage.removeItem(
+      "meenamitra_refresh_token"
+    );
+
+    localStorage.removeItem(
+      "meenamitra_email"
+    );
+
+  }
+
+
+  // ==========================================================
+  // REFRESH ACCESS TOKEN
+  // ==========================================================
+
+  async function refreshAccessToken() {
+
+    const refreshToken =
+      localStorage.getItem(
+        "meenamitra_refresh_token"
+      );
+
+
+    if (!refreshToken) {
+
+      return null;
+
+    }
+
+
+    try {
+
+      const response = await fetch(
+        `${API_URL}/refresh`,
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+
+          body: JSON.stringify({
+            refresh_token:
+              refreshToken,
+          }),
+        }
+      );
+
+
+      const data =
+        await response.json();
+
+
+      if (!response.ok) {
+
+        clearAuthSession();
+
+        return null;
+
+      }
+
+
+      saveAuthSession(data);
+
+
+      return data.access_token;
+
+    }
+
+    catch (err) {
+
+      console.error(
+        "Token refresh error:",
+        err
+      );
+
+      return null;
+
+    }
+
+  }
+
+
+  // ==========================================================
+  // AUTHENTICATED FETCH
+  //
+  // Automatically retries once after
+  // an expired access token.
+  // ==========================================================
+
+  async function authenticatedFetch(
+    url,
+    options = {}
+  ) {
+
+    let token =
+      localStorage.getItem(
+        "meenamitra_token"
+      );
+
+
+    if (!token) {
+
+      throw new Error(
+        "Please login first."
+      );
+
+    }
+
+
+    const firstOptions = {
+
+      ...options,
+
+      headers: {
+
+        ...(options.headers || {}),
+
+        Authorization:
+          `Bearer ${token}`,
+
+      },
+
+    };
+
+
+    let response =
+      await fetch(
+        url,
+        firstOptions
+      );
+
+
+    // --------------------------------------------------------
+    // ACCESS TOKEN EXPIRED
+    // --------------------------------------------------------
+
+    if (response.status === 401) {
+
+      const newToken =
+        await refreshAccessToken();
+
+
+      if (!newToken) {
+
+        throw new Error(
+          "Your session has expired. Please login again."
+        );
+
+      }
+
+
+      const retryOptions = {
+
+        ...options,
+
+        headers: {
+
+          ...(options.headers || {}),
+
+          Authorization:
+            `Bearer ${newToken}`,
+
+        },
+
+      };
+
+
+      response =
+        await fetch(
+          url,
+          retryOptions
+        );
+
+    }
+
+
+    return response;
+
+  }
+
+
+  // ==========================================================
+  // RESTORE SESSION ON PAGE LOAD
   // ==========================================================
 
   useEffect(() => {
 
-    const token =
-      localStorage.getItem("meenamitra_token");
+    async function restoreSession() {
 
-    if (token) {
+      const token =
+        localStorage.getItem(
+          "meenamitra_token"
+        );
 
-      setIsLoggedIn(true);
+      const refreshToken =
+        localStorage.getItem(
+          "meenamitra_refresh_token"
+        );
 
-      loadHistory(token);
+
+      // Nothing stored
+
+      if (!token && !refreshToken) {
+
+        return;
+
+      }
+
+
+      // First try existing token
+
+      if (token) {
+
+        try {
+
+          const response =
+            await fetch(
+              `${API_URL}/history`,
+              {
+                headers: {
+                  Authorization:
+                    `Bearer ${token}`,
+                },
+              }
+            );
+
+
+          if (response.ok) {
+
+            setIsLoggedIn(true);
+
+            const data =
+              await response.json();
+
+
+            setHistory(
+              Array.isArray(
+                data.history
+              )
+                ? data.history
+                : []
+            );
+
+
+            return;
+
+          }
+
+        }
+
+        catch (err) {
+
+          console.error(
+            "Session check error:",
+            err
+          );
+
+        }
+
+      }
+
+
+      // Existing token failed.
+      // Try refresh token.
+
+      if (refreshToken) {
+
+        const newToken =
+          await refreshAccessToken();
+
+
+        if (newToken) {
+
+          setIsLoggedIn(true);
+
+          await loadHistory(
+            newToken
+          );
+
+          return;
+
+        }
+
+      }
+
+
+      // Both tokens failed.
+
+      clearAuthSession();
+
+      setIsLoggedIn(false);
 
     }
+
+
+    restoreSession();
 
   }, []);
 
@@ -77,46 +419,46 @@ function App() {
 
     setError("");
 
+
     try {
 
-      const response = await fetch(
-        `${API_URL}/signup`,
-        {
-          method: "POST",
+      const response =
+        await fetch(
+          `${API_URL}/signup`,
+          {
+            method: "POST",
 
-          headers: {
-            "Content-Type": "application/json",
-          },
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
 
-          body: JSON.stringify({
-            email,
-            password,
-          }),
-        }
-      );
+            body: JSON.stringify({
+              email,
+              password,
+            }),
+
+          }
+        );
 
 
-      const data = await response.json();
+      const data =
+        await response.json();
 
 
       if (!response.ok) {
 
         throw new Error(
-          data.detail || "Signup failed"
+          data.detail ||
+          "Signup failed"
         );
 
       }
 
 
-      // Some Supabase configurations return
-      // an access token immediately.
-
       if (data.access_token) {
 
-        localStorage.setItem(
-          "meenamitra_token",
-          data.access_token
-        );
+        saveAuthSession(data);
 
         setIsLoggedIn(true);
 
@@ -141,7 +483,8 @@ function App() {
     catch (err) {
 
       setError(
-        err.message || "Signup failed"
+        err.message ||
+        "Signup failed"
       );
 
     }
@@ -159,47 +502,49 @@ function App() {
 
     setError("");
 
+
     try {
 
-      const response = await fetch(
-        `${API_URL}/login`,
-        {
-          method: "POST",
+      const response =
+        await fetch(
+          `${API_URL}/login`,
+          {
+            method: "POST",
 
-          headers: {
-            "Content-Type": "application/json",
-          },
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
 
-          body: JSON.stringify({
-            email,
-            password,
-          }),
-        }
-      );
+            body: JSON.stringify({
+              email,
+              password,
+            }),
+
+          }
+        );
 
 
-      const data = await response.json();
+      const data =
+        await response.json();
 
 
       if (!response.ok) {
 
         throw new Error(
-          data.detail || "Login failed"
+          data.detail ||
+          "Login failed"
         );
 
       }
 
 
-      localStorage.setItem(
-        "meenamitra_token",
-        data.access_token
-      );
+      saveAuthSession(data);
 
 
       setIsLoggedIn(true);
 
 
-      // Load saved conversations
       await loadHistory(
         data.access_token
       );
@@ -209,7 +554,8 @@ function App() {
     catch (err) {
 
       setError(
-        err.message || "Login failed"
+        err.message ||
+        "Login failed"
       );
 
     }
@@ -218,47 +564,61 @@ function App() {
 
 
   // ==========================================================
-  // LOAD CHAT HISTORY
+  // LOAD HISTORY
   // ==========================================================
 
-  async function loadHistory(token) {
+  async function loadHistory(
+    token = null
+  ) {
 
     try {
 
-      const response = await fetch(
-        `${API_URL}/history`,
-        {
-          method: "GET",
-
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
+      let response;
 
 
-      const data = await response.json();
+      if (token) {
+
+        response =
+          await fetch(
+            `${API_URL}/history`,
+            {
+              headers: {
+                Authorization:
+                  `Bearer ${token}`,
+              },
+            }
+          );
+
+      }
+
+      else {
+
+        response =
+          await authenticatedFetch(
+            `${API_URL}/history`
+          );
+
+      }
+
+
+      const data =
+        await response.json();
 
 
       if (!response.ok) {
 
         throw new Error(
-          data.detail || "Could not load chat history"
+          data.detail ||
+          "Could not load chat history"
         );
 
       }
 
 
-      // IMPORTANT:
-      //
-      // Backend returns:
-      // { history: [...] }
-      //
-      // NOT:
-      // { conversations: [...] }
-
       setHistory(
-        Array.isArray(data.history)
+        Array.isArray(
+          data.history
+        )
           ? data.history
           : []
       );
@@ -283,9 +643,13 @@ function App() {
 
   function openHistoryChat(item) {
 
-    setActiveHistoryId(item.id);
+    setActiveHistoryId(
+      item.id
+    );
+
 
     setMessages([
+
       {
         role: "user",
         content: item.question,
@@ -295,7 +659,9 @@ function App() {
         role: "assistant",
         content: item.answer,
       },
+
     ]);
+
 
     setError("");
 
@@ -303,7 +669,7 @@ function App() {
 
 
   // ==========================================================
-  // SEND CHAT MESSAGE
+  // SEND MESSAGE
   // ==========================================================
 
   async function sendMessage(e) {
@@ -342,26 +708,24 @@ function App() {
       question.trim();
 
 
-    // Immediately display user message
-
     setMessages(
-      (previous) => [
+      previous => [
 
         ...previous,
 
         {
           role: "user",
-          content: currentQuestion,
+          content:
+            currentQuestion,
         },
 
       ]
     );
 
 
-    // New message means we're no longer
-    // viewing a previous saved conversation.
-
-    setActiveHistoryId(null);
+    setActiveHistoryId(
+      null
+    );
 
 
     setQuestion("");
@@ -373,24 +737,25 @@ function App() {
 
     try {
 
-      const response = await fetch(
-        `${API_URL}/chat`,
-        {
-          method: "POST",
+      const response =
+        await authenticatedFetch(
+          `${API_URL}/chat`,
+          {
 
-          headers: {
-            "Content-Type": "application/json",
+            method: "POST",
 
-            Authorization:
-              `Bearer ${token}`,
-          },
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
 
-          body: JSON.stringify({
-            question:
-              currentQuestion,
-          }),
-        }
-      );
+            body: JSON.stringify({
+              question:
+                currentQuestion,
+            }),
+
+          }
+        );
 
 
       const data =
@@ -407,26 +772,22 @@ function App() {
       }
 
 
-      // Display AI answer
-
       setMessages(
-        (previous) => [
+        previous => [
 
           ...previous,
 
           {
             role: "assistant",
-            content: data.answer,
+            content:
+              data.answer,
           },
 
         ]
       );
 
 
-      // Reload history after
-      // successful database save
-
-      await loadHistory(token);
+      await loadHistory();
 
     }
 
@@ -454,9 +815,7 @@ function App() {
 
   function logout() {
 
-    localStorage.removeItem(
-      "meenamitra_token"
-    );
+    clearAuthSession();
 
 
     setIsLoggedIn(false);
@@ -563,8 +922,10 @@ function App() {
               type="email"
               placeholder="Email address"
               value={email}
-              onChange={(e) =>
-                setEmail(e.target.value)
+              onChange={e =>
+                setEmail(
+                  e.target.value
+                )
               }
               required
             />
@@ -574,8 +935,10 @@ function App() {
               type="password"
               placeholder="Password"
               value={password}
-              onChange={(e) =>
-                setPassword(e.target.value)
+              onChange={e =>
+                setPassword(
+                  e.target.value
+                )
               }
               minLength={6}
               required
@@ -636,7 +999,7 @@ function App() {
 
 
   // ==========================================================
-  // MAIN CHAT SCREEN
+  // MAIN APPLICATION
   // ==========================================================
 
   return (
@@ -656,9 +1019,6 @@ function App() {
         }
       >
 
-
-        {/* SIDEBAR HEADER */}
-
         <div className="sidebar-header">
 
           <div className="brand-small">
@@ -669,11 +1029,8 @@ function App() {
 
             </div>
 
-
             <span>
-
               MeenaMitra
-
             </span>
 
           </div>
@@ -693,8 +1050,6 @@ function App() {
         </div>
 
 
-        {/* NEW CHAT */}
-
         <button
           className="new-chat-button"
           onClick={newChat}
@@ -707,8 +1062,6 @@ function App() {
         </button>
 
 
-        {/* RECENT CONVERSATIONS TITLE */}
-
         <div className="history-title">
 
           <MessageCircle size={16} />
@@ -717,8 +1070,6 @@ function App() {
 
         </div>
 
-
-        {/* HISTORY */}
 
         <div className="history-list">
 
@@ -736,44 +1087,47 @@ function App() {
 
           ) : (
 
-            history.map((item) => (
+            history.map(
+              item => (
 
-              <button
-                type="button"
+                <button
+                  type="button"
 
-                className={
-                  activeHistoryId === item.id
-                    ? "history-item active"
-                    : "history-item"
-                }
+                  className={
+                    activeHistoryId ===
+                    item.id
+                      ? "history-item active"
+                      : "history-item"
+                  }
 
-                key={item.id}
+                  key={item.id}
 
-                onClick={() =>
-                  openHistoryChat(item)
-                }
-              >
+                  onClick={() =>
+                    openHistoryChat(
+                      item
+                    )
+                  }
+                >
 
-                <MessageCircle
-                  size={15}
-                />
+                  <MessageCircle
+                    size={15}
+                  />
 
-                <span>
+                  <span>
 
-                  {item.question}
+                    {item.question}
 
-                </span>
+                  </span>
 
-              </button>
+                </button>
 
-            ))
+              )
+            )
 
           )}
 
         </div>
 
-
-        {/* SIDEBAR BOTTOM */}
 
         <div className="sidebar-bottom">
 
@@ -803,13 +1157,10 @@ function App() {
 
 
       {/* ======================================================
-          MAIN CHAT AREA
+          MAIN CHAT
       ====================================================== */}
 
       <main className="chat-area">
-
-
-        {/* HEADER */}
 
         <header className="chat-header">
 
@@ -832,16 +1183,11 @@ function App() {
           <div>
 
             <h2>
-
               MeenaMitra
-
             </h2>
 
-
             <span>
-
               Aquaculture AI Advisor
-
             </span>
 
           </div>
@@ -849,12 +1195,7 @@ function App() {
         </header>
 
 
-        {/* ====================================================
-            MESSAGES
-        ==================================================== */}
-
         <section className="messages">
-
 
           {messages.length === 0 ? (
 
@@ -884,7 +1225,6 @@ function App() {
 
 
               <div className="suggestions">
-
 
                 <button
                   onClick={() =>
@@ -937,7 +1277,6 @@ function App() {
 
                 </button>
 
-
               </div>
 
             </div>
@@ -957,7 +1296,6 @@ function App() {
                   key={index}
                 >
 
-
                   <div className="message-avatar">
 
                     {message.role === "user"
@@ -968,7 +1306,6 @@ function App() {
 
 
                   <div className="message-content">
-
 
                     <div className="message-name">
 
@@ -985,48 +1322,37 @@ function App() {
 
                     </div>
 
-
                   </div>
 
                 </div>
 
               )
-
             )
 
           )}
 
-
-          {/* THINKING INDICATOR */}
 
           {loading && (
 
             <div className="message assistant-message">
 
               <div className="message-avatar">
-
                 🐟
-
               </div>
 
 
               <div className="message-content">
 
                 <div className="message-name">
-
                   MeenaMitra
-
                 </div>
 
 
                 <div className="typing">
 
                   Thinking
-
                   <span>.</span>
-
                   <span>.</span>
-
                   <span>.</span>
 
                 </div>
@@ -1040,8 +1366,6 @@ function App() {
         </section>
 
 
-        {/* ERROR */}
-
         {error && (
 
           <div className="chat-error">
@@ -1053,10 +1377,6 @@ function App() {
         )}
 
 
-        {/* ====================================================
-            CHAT INPUT
-        ==================================================== */}
-
         <form
           className="chat-input-area"
           onSubmit={sendMessage}
@@ -1064,12 +1384,11 @@ function App() {
 
           <div className="input-wrapper">
 
-
             <textarea
 
               value={question}
 
-              onChange={(e) =>
+              onChange={e =>
                 setQuestion(
                   e.target.value
                 )
@@ -1079,7 +1398,7 @@ function App() {
 
               rows={1}
 
-              onKeyDown={(e) => {
+              onKeyDown={e => {
 
                 if (
                   e.key === "Enter" &&
@@ -1114,7 +1433,6 @@ function App() {
 
             </button>
 
-
           </div>
 
 
@@ -1125,9 +1443,7 @@ function App() {
 
           </div>
 
-
         </form>
-
 
       </main>
 
