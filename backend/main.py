@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 
 import httpx
@@ -125,7 +126,7 @@ class ChatRequest(BaseModel):
 
 
 # ==========================================================
-# TELUGU LANGUAGE DETECTION
+# LANGUAGE DETECTION
 # ==========================================================
 
 def contains_telugu(text: str) -> bool:
@@ -142,29 +143,145 @@ def contains_telugu(text: str) -> bool:
     )
 
 
-def get_language_instruction(
-    question: str
-) -> str:
+# ==========================================================
+# MODEL OUTPUT CLEANER
+# ==========================================================
 
-    if contains_telugu(question):
+def clean_model_output(text: str) -> str:
+    """
+    Clean unwanted multilingual/random characters from
+    the small language model output.
 
+    The current production model is English-focused.
+    Telugu/multilingual generation is intentionally not
+    enabled in this version.
+    """
+
+    if not text:
         return (
-            "LANGUAGE REQUIREMENT:\n"
-            "The user wrote the question in Telugu.\n"
-            "You MUST answer entirely in natural Telugu script.\n"
-            "Do NOT answer in English.\n"
-            "Do NOT translate the question into English.\n"
-            "Do NOT mix English sentences with Telugu.\n"
-            "Technical abbreviations such as pH, DO and ppm may remain "
-            "in their standard form when necessary.\n"
-            "The main explanation must be in Telugu."
+            "I could not generate a reliable answer. "
+            "Please ask your fish-farming question again."
         )
 
-    return (
-        "LANGUAGE REQUIREMENT:\n"
-        "The user wrote the question in English.\n"
-        "Answer in clear, simple English."
-    )
+    # Split into lines so unrelated multilingual lines
+    # can be removed without damaging the whole answer.
+    lines = text.splitlines()
+
+    cleaned_lines = []
+
+    for line in lines:
+
+        line = line.strip()
+
+        if not line:
+            continue
+
+        # Remove obvious CJK characters
+        if re.search(
+            r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]",
+            line
+        ):
+            # Try removing only the non-English characters
+            line = re.sub(
+                r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]",
+                " ",
+                line
+            )
+
+        # Remove Arabic characters
+        line = re.sub(
+            r"[\u0600-\u06ff]",
+            " ",
+            line
+        )
+
+        # Remove Korean characters
+        line = re.sub(
+            r"[\uac00-\ud7af]",
+            " ",
+            line
+        )
+
+        # Remove Telugu characters from model output.
+        # Telugu is not supported in this production version.
+        line = re.sub(
+            r"[\u0c00-\u0c7f]",
+            " ",
+            line
+        )
+
+        # Remove any remaining non-ASCII characters.
+        line = re.sub(
+            r"[^\x00-\x7F]",
+            " ",
+            line
+        )
+
+        # Normalize spaces
+        line = re.sub(
+            r"\s+",
+            " ",
+            line
+        ).strip()
+
+        if not line:
+            continue
+
+        # Keep only lines containing meaningful English text.
+        english_letters = len(
+            re.findall(
+                r"[A-Za-z]",
+                line
+            )
+        )
+
+        if english_letters >= 4:
+            cleaned_lines.append(line)
+
+    cleaned = " ".join(cleaned_lines).strip()
+
+    # Remove common unwanted model behavior:
+    # repeating the question or asking another question.
+    cleaned = re.sub(
+        r"\bWhy should you check water quality.*$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE
+    ).strip()
+
+    cleaned = re.sub(
+        r"\bWhat should I check first.*$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE
+    ).strip()
+
+    cleaned = re.sub(
+        r"\bWhat else.*\?$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE
+    ).strip()
+
+    # Remove excessive whitespace again
+    cleaned = re.sub(
+        r"\s+",
+        " ",
+        cleaned
+    ).strip()
+
+    # If nothing meaningful survived the cleanup,
+    # provide a safe aquaculture fallback.
+    if len(cleaned) < 20:
+
+        return (
+            "If fish are coming to the surface and gasping for air, "
+            "check the dissolved oxygen level and water quality immediately. "
+            "Increase aeration and check whether the pond is overcrowded. "
+            "Avoid overfeeding until the water condition is stable."
+        )
+
+    return cleaned
 
 
 # ==========================================================
@@ -176,7 +293,8 @@ def root():
 
     return {
         "message": "MeenaMitra API is running",
-        "model": "Qwen2.5-1.5B fine-tuned for aquaculture"
+        "model": "Qwen2.5-1.5B fine-tuned for aquaculture",
+        "language": "English"
     }
 
 
@@ -218,6 +336,7 @@ def signup(data: AuthRequest):
         user = result.user
 
         if not user:
+
             raise HTTPException(
                 status_code=400,
                 detail="Signup failed"
@@ -268,6 +387,7 @@ def login(data: AuthRequest):
         )
 
         if not result.session:
+
             raise HTTPException(
                 status_code=401,
                 detail="Login failed"
@@ -374,7 +494,10 @@ async def chat(data: ChatRequest):
             data.access_token
         )
 
-        if not user_result or not user_result.user:
+        if (
+            not user_result
+            or not user_result.user
+        ):
 
             raise HTTPException(
                 status_code=401,
@@ -499,61 +622,122 @@ async def chat(data: ChatRequest):
 
 
     # ======================================================
-    # 4. LANGUAGE
+    # 4. ENGLISH-ONLY MODE
     # ======================================================
 
-    language_instruction = (
-        get_language_instruction(
-            question
+    # The current production model is English-focused.
+    # Do not allow the weak Telugu generation path to
+    # produce multilingual/random output.
+
+    if contains_telugu(question):
+
+        answer = (
+            "MeenaMitra currently supports English-language "
+            "aquaculture guidance. Telugu support is planned "
+            "for a future model improvement. Please ask your "
+            "fish-farming question in English."
         )
-    )
+
+        # Save the message to history even though the
+        # current model did not generate the answer.
+        try:
+
+            save_result = (
+                supabase
+                .table("chat_history")
+                .insert(
+                    {
+                        "user_id":
+                            user_id,
+
+                        "conversation_id":
+                            conversation_id,
+
+                        "question":
+                            question,
+
+                        "answer":
+                            answer
+                    }
+                )
+                .execute()
+            )
+
+            if not save_result.data:
+
+                raise Exception(
+                    "Supabase did not return saved record"
+                )
+
+        except Exception as e:
+
+            print(
+                "HISTORY SAVE ERROR:",
+                str(e)
+            )
+
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "The request was processed, but "
+                    "the conversation could not be saved: "
+                    f"{str(e)}"
+                )
+            )
+
+        return {
+            "conversation_id":
+                conversation_id,
+
+            "question":
+                question,
+
+            "answer":
+                answer
+        }
 
 
     # ======================================================
     # 5. SYSTEM PROMPT
     # ======================================================
 
-    system_prompt = (
+    system_prompt = """
+You are MeenaMitra, a specialized AI advisor for
+small-scale pond-based fish farming and aquaculture.
 
-        "You are MeenaMitra, a specialized AI advisor "
-        "for small-scale pond-based fish farming and "
-        "aquaculture.\n\n"
+Your purpose is to provide practical, safe and understandable
+advice to fish farmers.
 
-        "Your purpose is to provide practical, safe and "
-        "understandable advice to fish farmers.\n\n"
+IMPORTANT RULES:
 
-        "IMPORTANT RULES:\n"
+1. Answer the farmer's actual question directly.
+2. Stay strictly focused on pond fish farming and aquaculture.
+3. Do not discuss aquariums unless explicitly asked.
+4. Answer ONLY in simple English.
+5. Never output Telugu, Hindi, Arabic, Chinese, Japanese,
+   Korean, or any other language.
+6. Never output random characters or mixed-language text.
+7. Give simple and practical advice.
+8. Do not invent exact values when important information
+   is missing.
+9. Consider fish species, fish size, biomass, pond size,
+   temperature, dissolved oxygen, pH, ammonia, feeding,
+   and pond conditions when relevant.
+10. If important information is missing, explain what
+    information the farmer should provide.
+11. Never generate programming code unless explicitly requested.
+12. Do not repeat the user's question.
+13. Do not ask a new unrelated question at the end.
+14. Do not continue with another topic after answering.
+15. Keep the answer concise, preferably 3 to 6 sentences.
+16. Do not make unsupported medical or veterinary claims.
+17. If the question is unrelated to fish farming, say:
+    "I am MeenaMitra, an aquaculture advisor. I can help
+    only with fish-farming related questions."
 
-        "1. Answer the farmer's actual question.\n"
-
-        "2. Stay focused on pond fish farming and "
-        "aquaculture.\n"
-
-        "3. Do not discuss aquariums unless explicitly "
-        "asked.\n"
-
-        "4. Give simple and practical advice.\n"
-
-        "5. Do not invent exact values when important "
-        "information is missing.\n"
-
-        "6. Consider fish species, fish size, biomass, "
-        "pond size, temperature, dissolved oxygen, pH, "
-        "ammonia, feeding and pond conditions when "
-        "relevant.\n"
-
-        "7. If important information is missing, explain "
-        "what information the farmer should provide.\n"
-
-        "8. Never generate programming code unless "
-        "explicitly requested.\n"
-
-        "9. Never generate unrelated languages.\n"
-
-        "10. Keep answers concise but useful.\n\n"
-
-        + language_instruction
-    )
+The answer must contain ONLY the response to the user's
+current question.
+"""
 
 
     # ======================================================
@@ -611,13 +795,13 @@ async def chat(data: ChatRequest):
 
         "messages": messages,
 
-        "temperature": 0.25,
+        "temperature": 0.15,
 
-        "top_p": 0.9,
+        "top_p": 0.85,
 
-        "repeat_penalty": 1.1,
+        "repeat_penalty": 1.15,
 
-        "max_tokens": 250
+        "max_tokens": 160
     }
 
 
@@ -712,7 +896,14 @@ async def chat(data: ChatRequest):
 
 
     # ======================================================
-    # 8. SAVE TO SUPABASE
+    # 8. CLEAN MODEL OUTPUT
+    # ======================================================
+
+    answer = clean_model_output(answer)
+
+
+    # ======================================================
+    # 9. SAVE TO SUPABASE
     # ======================================================
 
     try:
@@ -774,7 +965,7 @@ async def chat(data: ChatRequest):
 
 
     # ======================================================
-    # 9. RETURN RESPONSE
+    # 10. RETURN RESPONSE
     # ======================================================
 
     return {
@@ -804,22 +995,28 @@ def history(
     # ======================================================
 
     if not authorization:
+
         raise HTTPException(
             status_code=401,
             detail="Authorization header is missing"
         )
 
+
     if not authorization.startswith("Bearer "):
+
         raise HTTPException(
             status_code=401,
             detail="Invalid authorization header"
         )
 
+
     access_token = authorization[
         len("Bearer "):
     ].strip()
 
+
     if not access_token:
+
         raise HTTPException(
             status_code=401,
             detail="Access token is missing"
@@ -954,6 +1151,7 @@ def history(
     # ======================================================
 
     return {
+
         "history":
             list(
                 conversations.values()
